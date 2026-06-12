@@ -82,9 +82,67 @@ def parse_pytest_output(content: str) -> dict[str, Any] | None:
 
 def parse_unittest_output(content: str) -> dict[str, Any] | None:
     """Parse unittest output to extract passed, failed, errors, skipped, and success."""
-    return None
+    ran_match = re.search(r"Ran\s+(\d+)\s+test(?:s)?", content)
+    if not ran_match:
+        return None
+        
+    total_tests = int(ran_match.group(1))
+    
+    passed = 0
+    failed = 0
+    errors = 0
+    skipped = 0
+    success = False
+    
+    ok_match = re.search(r"^OK(?:\s*\((.*?)\))?$", content, re.MULTILINE)
+    failed_match = re.search(r"^FAILED\s*\((.*?)\)$", content, re.MULTILINE)
+    
+    if ok_match:
+        success = True
+        details = ok_match.group(1) or ""
+        skipped_match = re.search(r"skipped=(\d+)", details)
+        if skipped_match:
+            skipped = int(skipped_match.group(1))
+        passed = total_tests - skipped
+    elif failed_match:
+        success = False
+        details = failed_match.group(1)
+        
+        failures_match = re.search(r"failures=(\d+)", details)
+        if failures_match:
+            failed = int(failures_match.group(1))
+            
+        errors_match = re.search(r"errors=(\d+)", details)
+        if errors_match:
+            errors = int(errors_match.group(1))
+            
+        skipped_match = re.search(r"skipped=(\d+)", details)
+        if skipped_match:
+            skipped = int(skipped_match.group(1))
+            
+        passed = max(0, total_tests - failed - errors - skipped)
+    else:
+        return None
+        
+    return {
+        "passed": passed,
+        "failed": failed,
+        "errors": errors,
+        "skipped": skipped,
+        "success": success,
+    }
 
 
 def parse_test_results(cmd: str, content: str) -> dict[str, Any] | None:
     """Parse command output for pytest or unittest results."""
+    # Check pytest first
+    pytest_res = parse_pytest_output(content)
+    if pytest_res is not None:
+        return pytest_res
+        
+    # Fallback to unittest
+    unittest_res = parse_unittest_output(content)
+    if unittest_res is not None:
+        return unittest_res
+        
     return None
