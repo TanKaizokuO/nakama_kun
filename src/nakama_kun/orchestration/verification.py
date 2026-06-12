@@ -560,28 +560,68 @@ class VerificationLayer:
                         args = {}
                 cmd: str = args.get("cmd", "<unknown>")
 
-                # Parse exit code from tool content if available
+                # Extract JSON if present
+                json_content = content
+                if content.startswith("ERROR: "):
+                    json_content = content[len("ERROR: "):]
+
+                is_json = False
                 exit_code = 0 if success else 1
-                ec_match = re.search(r"Exit code:\s*(-?\d+)", content)
-                if ec_match:
-                    exit_code = int(ec_match.group(1))
+                stdout_val = ""
+                stderr_val = ""
 
-                test_summary = parse_test_results(cmd, content)
-                cmd_success = success
-                if test_summary is not None:
-                    cmd_success = test_summary["success"]
+                try:
+                    data = json.loads(json_content)
+                    if isinstance(data, dict) and "exit_code" in data:
+                        exit_code = data["exit_code"]
+                        stdout_val = data.get("stdout", "")
+                        stderr_val = data.get("stderr", "")
+                        is_json = True
+                except Exception:
+                    pass
 
-                command_results.append(
-                    CommandResult(
-                        cmd=cmd,
-                        exit_code=exit_code,
-                        stdout_snippet=content,
-                        success=cmd_success,
-                        test_summary=test_summary,
+                if is_json:
+                    combined = stdout_val
+                    if stderr_val:
+                        combined += "\n" + stderr_val
+
+                    test_summary = parse_test_results(cmd, combined)
+                    cmd_success = (exit_code == 0)
+                    if test_summary is not None:
+                        cmd_success = test_summary["success"]
+
+                    command_results.append(
+                        CommandResult(
+                            cmd=cmd,
+                            exit_code=exit_code,
+                            stdout_snippet=combined,
+                            success=cmd_success,
+                            test_summary=test_summary,
+                        )
                     )
-                )
+                else:
+                    # Fallback to old behavior
+                    exit_code = 0 if success else 1
+                    ec_match = re.search(r"Exit code:\s*(-?\d+)", content)
+                    if ec_match:
+                        exit_code = int(ec_match.group(1))
+
+                    test_summary = parse_test_results(cmd, content)
+                    cmd_success = success
+                    if test_summary is not None:
+                        cmd_success = test_summary["success"]
+
+                    command_results.append(
+                        CommandResult(
+                            cmd=cmd,
+                            exit_code=exit_code,
+                            stdout_snippet=content,
+                            success=cmd_success,
+                            test_summary=test_summary,
+                        )
+                    )
                 logger.debug(
-                    f"[Verification] run_command: cmd={cmd!r} exit_code={exit_code} success={cmd_success} has_tests={test_summary is not None}"
+                    f"[Verification] run_command: cmd={cmd!r} exit_code={exit_code} success={command_results[-1].success} has_tests={test_summary is not None}"
                 )
 
             # --- list_files / search_files: note any paths in results ---
