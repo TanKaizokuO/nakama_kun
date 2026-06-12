@@ -68,22 +68,33 @@ class RunCommandTool(BaseTool):
 
         stdout = result.stdout or ""
         stderr = result.stderr or ""
-        combined = (stdout + stderr).strip()
 
-        # Truncate extremely long output
-        if len(combined) > _MAX_OUTPUT_CHARS:
-            combined = combined[:_MAX_OUTPUT_CHARS] + "\n...[output truncated]"
+        # Truncate extremely long output if combined length exceeds _MAX_OUTPUT_CHARS
+        if len(stdout) + len(stderr) > _MAX_OUTPUT_CHARS:
+            half_max = _MAX_OUTPUT_CHARS // 2
+            if len(stdout) > half_max and len(stderr) > half_max:
+                stdout = stdout[:half_max] + "\n...[stdout truncated]"
+                stderr = stderr[:half_max] + "\n...[stderr truncated]"
+            elif len(stdout) > _MAX_OUTPUT_CHARS - len(stderr):
+                stdout = stdout[:_MAX_OUTPUT_CHARS - len(stderr)] + "\n...[stdout truncated]"
+            elif len(stderr) > _MAX_OUTPUT_CHARS - len(stdout):
+                stderr = stderr[:_MAX_OUTPUT_CHARS - len(stdout)] + "\n...[stderr truncated]"
 
         success = result.returncode == 0
-        output = (
-            f"Exit code: {result.returncode}\n"
-            f"Output:\n{combined}" if combined else f"Exit code: {result.returncode}"
-        )
+
+        import json
+        response_data = {
+            "success": success,
+            "exit_code": result.returncode,
+            "stdout": stdout,
+            "stderr": stderr,
+        }
+        json_str = json.dumps(response_data)
 
         if success:
-            return ToolResult(success=True, output=output)
+            return ToolResult(success=True, output=json_str)
         return ToolResult(
             success=False,
-            output=output,
-            error=f"Command exited with code {result.returncode}.",
+            output=json_str,
+            error=json_str,
         )
