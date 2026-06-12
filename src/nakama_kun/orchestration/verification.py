@@ -33,6 +33,8 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from nakama_kun.orchestration.test_parser import parse_test_results
+
 if TYPE_CHECKING:
     from nakama_kun.orchestration.state import AgentState
 
@@ -532,16 +534,22 @@ class VerificationLayer:
                 if ec_match:
                     exit_code = int(ec_match.group(1))
 
+                test_summary = parse_test_results(cmd, content)
+                cmd_success = success
+                if test_summary is not None:
+                    cmd_success = test_summary["success"]
+
                 command_results.append(
                     CommandResult(
                         cmd=cmd,
                         exit_code=exit_code,
                         stdout_snippet=content,
-                        success=success,
+                        success=cmd_success,
+                        test_summary=test_summary,
                     )
                 )
                 logger.debug(
-                    f"[Verification] run_command: cmd={cmd!r} exit_code={exit_code} success={success}"
+                    f"[Verification] run_command: cmd={cmd!r} exit_code={exit_code} success={cmd_success} has_tests={test_summary is not None}"
                 )
 
             # --- list_files / search_files: note any paths in results ---
