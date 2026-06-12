@@ -1,0 +1,57 @@
+# Secrets & credentials — NEVER commit these
+.env
+.env.*
+*.key
+*.pem
+secrets/
+
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+*.egg
+
+# Virtual environments
+.venv
+venv/
+env/
+prompts/
+
+# uv lock file (optional — commit if you want reproducible installs)
+# uv.lock
+
+# Distribution / packaging
+.Python
+sdist/
+pip-wheel-metadata/
+
+# IDE & editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Type checkers
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+dmypy.json
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# Runtime databases
+*.db
