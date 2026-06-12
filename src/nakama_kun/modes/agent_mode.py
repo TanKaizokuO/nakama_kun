@@ -185,6 +185,7 @@ class AgentMode(BaseMode):
 
         from nakama_kun.ai.services.planner_service import PlannerService
         from nakama_kun.memory import get_memory_repository
+        from nakama_kun.orchestration.nodes import RESEARCH_THRESHOLD
         from nakama_kun.orchestration.workflow import build_agent_graph
 
         task_id = str(uuid.uuid4())
@@ -209,6 +210,18 @@ class AgentMode(BaseMode):
         initial_state = {
             "goal": user_task,
             "plan": None,
+            "required_artifacts": [],
+            "created_artifacts": [],
+            "missing_artifacts": [],
+            "research_budget_remaining": RESEARCH_THRESHOLD,
+            "delivery_mode": False,
+            "retry_memory": {
+                "completed_actions": [],
+                "failed_actions": [],
+                "failed_validations": [],
+                "reviewer_feedback": [],
+                "failed_attempt_signatures": [],
+            },
             "messages": list(history),
             "tool_results": [],
             "reviewer_feedback": None,

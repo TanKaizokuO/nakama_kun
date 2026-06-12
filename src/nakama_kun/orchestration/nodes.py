@@ -18,6 +18,131 @@ from nakama_kun.orchestration.verification import VerificationLayer
 from nakama_kun.tools import ToolRegistry, ToolRouter
 from nakama_kun.tools.interfaces import ToolResult
 
+RESEARCH_THRESHOLD = 15
+EXPLORATION_TOOLS = {"list_files", "read_file", "search_files"}
+DELIVERY_TOOLS = {
+    "write_file",
+    "replace_file_content",
+    "multi_replace_file_content",
+    "run_command",
+    "ask_permission",
+}
+
+
+def _empty_retry_memory() -> dict[str, list[str]]:
+    return {
+        "completed_actions": [],
+        "failed_actions": [],
+        "failed_validations": [],
+        "reviewer_feedback": [],
+        "failed_attempt_signatures": [],
+    }
+
+
+def _action_signature(name: str, arguments: dict[str, Any] | str) -> str:
+    normalized = _normalize_tool_arguments(arguments)
+    return f"{name}:{normalized}"
+
+
+def _paths_match(expected: str, actual: str) -> bool:
+    from pathlib import Path
+
+    expected_path = Path(expected)
+    actual_path = Path(actual)
+    return (
+        actual == expected
+        or actual.endswith(expected)
+        or actual_path.name == expected_path.name
+    )
+
+
+def _missing_required_artifacts(
+    required_artifacts: list[str],
+    created_artifacts: list[str],
+) -> list[str]:
+    missing = []
+    for required in required_artifacts:
+        if not any(_paths_match(required, created) for created in created_artifacts):
+            missing.append(required)
+    return missing
+
+
+def _count_research_actions(tool_results: list[dict[str, Any]]) -> int:
+    return sum(1 for r in tool_results if r.get("tool") in EXPLORATION_TOOLS)
+
+
+def _prioritize_tool_schemas(
+    tool_schemas: list[dict[str, Any]],
+    delivery_mode: bool,
+) -> list[dict[str, Any]]:
+    if not delivery_mode:
+        return tool_schemas
+
+    def score(schema: dict[str, Any]) -> int:
+        name = schema.get("function", {}).get("name", "")
+        if name == "write_file":
+            return 1000
+        if name in DELIVERY_TOOLS:
+            return 500
+        if name in EXPLORATION_TOOLS:
+            return -500
+        return 0
+
+    return sorted(tool_schemas, key=score, reverse=True)
+
+
+def _delivery_guidance(missing_artifacts: list[str]) -> Message:
+    artifacts = "\n".join(f"- {artifact}" for artifact in missing_artifacts) or "(none)"
+    return Message(
+        role="system",
+        content=(
+            "RESEARCH PHASE COMPLETE\n\n"
+            "Required Artifacts:\n"
+            f"{artifacts}\n\n"
+            "You already possess enough information.\n\n"
+            "Further repository exploration is prohibited.\n\n"
+            "Use existing evidence.\n\n"
+            "Create the missing artifacts now.\n\n"
+            "Preferred tool: write_file"
+        ),
+    )
+
+
+def _build_retry_memory(
+    state: AgentState,
+    completed_actions: list[str],
+    failed_actions: list[str],
+    failed_validations: list[str],
+    feedback: str | None,
+) -> dict[str, list[str]]:
+    memory = _empty_retry_memory()
+    existing = state.get("retry_memory") or {}
+    for key in memory:
+        memory[key] = list(existing.get(key, []))
+
+    memory["completed_actions"].extend(completed_actions)
+    memory["failed_actions"].extend(failed_actions)
+    memory["failed_validations"].extend(failed_validations)
+    if feedback:
+        memory["reviewer_feedback"].append(feedback)
+
+    for entry in state.get("tool_results", []):
+        if not entry.get("success", False):
+            memory["failed_attempt_signatures"].append(
+                _action_signature(entry.get("tool", ""), entry.get("arguments", {}))
+            )
+
+    for key, values in memory.items():
+        seen = set()
+        deduped = []
+        for value in values:
+            if value in seen:
+                continue
+            seen.add(value)
+            deduped.append(value)
+        memory[key] = deduped
+    return memory
+
 
 def _normalize_tool_arguments(arguments: dict[str, Any] | str) -> str:
     """Return a stable representation for duplicate tool-call detection."""
@@ -174,6 +299,32 @@ def make_planner_node(planner_service: PlannerService) -> Callable[[AgentState],
             else:
                 logger.warning("[LangGraph] Planner: no verification_report in state during retry.")
 
+            required_artifacts = state.get("required_artifacts", [])
+            created_artifacts = state.get("created_artifacts", [])
+            missing_artifacts = _missing_required_artifacts(required_artifacts, created_artifacts)
+            if missing_artifacts:
+                failed_validations.extend(
+                    f"- Missing required artifact: {artifact}"
+                    for artifact in missing_artifacts
+                )
+
+            retry_memory = _build_retry_memory(
+                state,
+                completed_actions=completed_actions,
+                failed_actions=previous_failures,
+                failed_validations=failed_validations,
+                feedback=feedback,
+            )
+            duplicate_warning = ""
+            if retry_memory["failed_attempt_signatures"]:
+                duplicate_warning = (
+                    "\nWARNING:\n"
+                    "Some actions already failed. Choose a different strategy and do not repeat "
+                    "the same tool name with the same normalized arguments.\n"
+                    "Failed Attempt Signatures:\n"
+                    + "\n".join(f"- {sig}" for sig in retry_memory["failed_attempt_signatures"])
+                )
+
             prompt_lines = [
                 f"Original Goal: {goal}",
                 "",
@@ -182,18 +333,22 @@ def make_planner_node(planner_service: PlannerService) -> Callable[[AgentState],
                 "### Reviewer Feedback",
                 feedback,
                 "",
+                "### Reviewer Feedback History",
+                "\n".join(retry_memory["reviewer_feedback"]) if retry_memory["reviewer_feedback"] else "(none)",
+                "",
                 "### Completed Actions",
-                "\n".join(completed_actions) if completed_actions else "(none)",
+                "\n".join(retry_memory["completed_actions"]) if retry_memory["completed_actions"] else "(none)",
                 "",
                 "### Previous Failures",
-                "\n".join(previous_failures) if previous_failures else "(none)",
+                "\n".join(retry_memory["failed_actions"]) if retry_memory["failed_actions"] else "(none)",
                 "",
                 "### User-Rejection Awareness",
                 "\n".join(user_rejections) if user_rejections else "(none)",
                 "If the user rejected proposed file content, you must either modify the content, ask for clarification, or choose a different approach. Do not resubmit identical content.",
                 "",
                 "### Failed Validations",
-                "\n".join(failed_validations) if failed_validations else "(none)",
+                "\n".join(retry_memory["failed_validations"]) if retry_memory["failed_validations"] else "(none)",
+                duplicate_warning,
                 "",
                 "Please update and refine the implementation plan to address the feedback and failures, ensuring that the revised plan avoids the same failures and targets resolving the remaining issues."
             ]
@@ -204,17 +359,25 @@ def make_planner_node(planner_service: PlannerService) -> Callable[[AgentState],
         else:
             logger.info("[LangGraph] Generating initial implementation plan...")
             prompt = goal
+            retry_memory = state.get("retry_memory") or _empty_retry_memory()
 
         plan, raw_text = await planner_service.plan(prompt)
 
-        required_artifacts = plan.required_artifacts if plan and hasattr(plan, "required_artifacts") else []
+        planned_artifacts = plan.required_artifacts if plan and hasattr(plan, "required_artifacts") else []
+        required_artifacts = planned_artifacts or state.get("required_artifacts", [])
+        created_artifacts = list(state.get("created_artifacts", [])) if feedback else []
+        missing_artifacts = _missing_required_artifacts(required_artifacts, created_artifacts)
 
         return {
             "plan": plan,
             "status": "executing",
             "retry_count": retry_count,
             "required_artifacts": required_artifacts,
-            "created_artifacts": [],
+            "created_artifacts": created_artifacts,
+            "missing_artifacts": missing_artifacts,
+            "research_budget_remaining": state.get("research_budget_remaining", RESEARCH_THRESHOLD),
+            "delivery_mode": state.get("delivery_mode", False),
+            "retry_memory": retry_memory,
             "messages": [
                 Message(role="assistant", content=f"Planner proposed Plan:\n{raw_text}")
             ],
@@ -267,31 +430,46 @@ def make_executor_node(
 
         required_artifacts = state.get("required_artifacts", [])
         created_artifacts = list(state.get("created_artifacts", []))
+        missing_artifacts = _missing_required_artifacts(required_artifacts, created_artifacts)
+        research_actions_used = _count_research_actions(state.get("tool_results", []))
+        research_budget_remaining = state.get(
+            "research_budget_remaining",
+            max(RESEARCH_THRESHOLD - research_actions_used, 0),
+        )
+        delivery_mode = state.get("delivery_mode", False)
+        failed_attempt_signatures = set(
+            (state.get("retry_memory") or {}).get("failed_attempt_signatures", [])
+        )
 
         for round_idx in range(1, max_rounds + 1):
             logger.info(f"[LangGraph] Executor Round {round_idx}/{max_rounds}...")
 
-            missing_artifacts = list(set(required_artifacts) - set(created_artifacts))
+            missing_artifacts = _missing_required_artifacts(required_artifacts, created_artifacts)
+            if missing_artifacts and (
+                research_budget_remaining <= 0
+                or research_actions_used >= RESEARCH_THRESHOLD
+                or round_idx >= max_rounds - 2
+            ):
+                delivery_mode = True
+
             current_messages = messages + new_messages
 
-            if missing_artifacts:
-                if round_idx >= max_rounds - 2:
-                    warning_msg = Message(
+            if missing_artifacts and delivery_mode:
+                current_messages.append(_delivery_guidance(missing_artifacts))
+            elif missing_artifacts:
+                current_messages.append(
+                    Message(
                         role="system",
-                        content=f"CRITICAL WARNING: Execution budget nearly exhausted ({round_idx}/{max_rounds}). "
-                                f"You MUST immediately create or modify the following required artifacts: {missing_artifacts}. "
-                                f"Do NOT explore the repository further."
+                        content=(
+                            f"Missing required artifacts: {missing_artifacts}. "
+                            f"Research budget remaining: {research_budget_remaining}. "
+                            "You must create them to complete the task."
+                        ),
                     )
-                    current_messages.append(warning_msg)
-                else:
-                    status_msg = Message(
-                        role="system",
-                        content=f"Missing required artifacts: {missing_artifacts}. You must eventually create them to complete the task."
-                    )
-                    current_messages.append(status_msg)
+                )
 
             response = await chat_service.chat_with_tools(
-                current_messages, tool_schemas
+                current_messages, _prioritize_tool_schemas(tool_schemas, delivery_mode)
             )
 
             # Check if execution finished
@@ -300,6 +478,10 @@ def make_executor_node(
                     role="assistant", content=response.content or ""
                 )
                 new_messages.append(assistant_msg)
+                if missing_artifacts and not delivery_mode:
+                    delivery_mode = True
+                    logger.info("[LangGraph] LLM stopped before required artifacts; forcing delivery mode.")
+                    continue
                 logger.info("[LangGraph] Execution completed.")
                 break
 
@@ -316,30 +498,35 @@ def make_executor_node(
                 arguments = tc.function.get("arguments", {})
                 key = _tool_call_key(name, arguments)
                 previous_attempt = attempt_history.get(key)
+                signature = _action_signature(name, arguments)
 
                 logger.info(f"[LangGraph] Dispatching tool {name} with args: {arguments}")
-                if round_idx >= max_rounds - 2 and missing_artifacts and name not in ["write_file", "run_command", "replace_file_content", "multi_replace_file_content", "ask_permission"]:
+                if delivery_mode and missing_artifacts and name in EXPLORATION_TOOLS:
                     error = (
-                        f"BUDGET EXHAUSTED: Tool '{name}' is blocked. Only write operations and commands "
-                        f"are allowed. You MUST create the missing artifacts: {missing_artifacts}"
+                        f"BUDGET EXHAUSTED: RESEARCH PHASE COMPLETE. Tool '{name}' is blocked. "
+                        "Further repository exploration is prohibited unless explicitly justified. "
+                        f"Create the missing artifacts now: {missing_artifacts}. Preferred tool: write_file."
                     )
                     result = ToolResult(success=False, error=error)
                     success = result.success
                     content = result.to_content()
                     logger.warning(
-                        f"[LangGraph] Blocked tool call {name} due to budget exhaustion."
+                        f"[LangGraph] Blocked exploratory tool call {name} in delivery mode."
                     )
-                elif previous_attempt and previous_attempt.get("last_result") is False:
+                elif (
+                    previous_attempt and previous_attempt.get("last_result") is False
+                ) or signature in failed_attempt_signatures:
                     error = (
                         "Identical tool call already failed. "
-                        "Modify the approach before retrying."
+                        "WARNING: This action already failed. Choose a different strategy."
                     )
                     result = ToolResult(success=False, error=error)
                     success = result.success
                     content = result.to_content()
+                    attempt_num = (previous_attempt["attempt_count"] if previous_attempt else 0) + 1
                     logger.warning(
                         f"[LangGraph] Blocked repeated failed tool call {name} "
-                        f"attempt={previous_attempt['attempt_count'] + 1}"
+                        f"attempt={attempt_num}"
                     )
                 else:
                     try:
@@ -360,6 +547,8 @@ def make_executor_node(
                     "last_result": success,
                     "last_error": error,
                 }
+                if not success:
+                    failed_attempt_signatures.add(signature)
 
                 tool_result_msg = Message(
                     role="tool",
@@ -379,6 +568,13 @@ def make_executor_node(
                     for p in paths:
                         if p not in created_artifacts:
                             created_artifacts.append(p)
+                    missing_artifacts = _missing_required_artifacts(required_artifacts, created_artifacts)
+
+                if name in EXPLORATION_TOOLS:
+                    research_actions_used += 1
+                    research_budget_remaining = max(RESEARCH_THRESHOLD - research_actions_used, 0)
+                    if missing_artifacts and research_budget_remaining <= 0:
+                        delivery_mode = True
 
                 new_tool_results.append(
                     {
@@ -388,6 +584,7 @@ def make_executor_node(
                         "content": observation,
                         "error": error,
                         "attempt_count": attempt_count,
+                        "attempt_signature": signature,
                     }
                 )
 
@@ -395,6 +592,9 @@ def make_executor_node(
             "messages": new_messages,
             "tool_results": new_tool_results,
             "created_artifacts": created_artifacts,
+            "missing_artifacts": _missing_required_artifacts(required_artifacts, created_artifacts),
+            "research_budget_remaining": research_budget_remaining,
+            "delivery_mode": delivery_mode,
             "status": "reviewing",
         }
 
@@ -416,9 +616,24 @@ def make_verifier_node(workspace_root: str | None = None) -> Callable[[AgentStat
         report = layer.run(state)
         logger.info(f"[LangGraph] Verifier complete: {report.summary}")
         evidence_store = build_evidence_store(state, report, workspace_root)
+        verified_artifacts = [
+            artifact.path
+            for artifact in [*report.files_created, *report.files_modified]
+            if artifact.exists
+        ]
+        created_artifacts = list(state.get("created_artifacts", []))
+        for artifact in verified_artifacts:
+            if artifact not in created_artifacts:
+                created_artifacts.append(artifact)
+        missing_artifacts = _missing_required_artifacts(
+            state.get("required_artifacts", []),
+            created_artifacts,
+        )
         return {
             "verification_report": report,
             "evidence_store": evidence_store,
+            "created_artifacts": created_artifacts,
+            "missing_artifacts": missing_artifacts,
             "status": "reviewing",
         }
 
@@ -437,6 +652,21 @@ def make_reviewer_node(chat_service: ChatService) -> Callable[[AgentState], Any]
         plan = state["plan"]
         verification_report = state.get("verification_report")
         evidence_store = state.get("evidence_store")
+        missing_artifacts = state.get("missing_artifacts", [])
+
+        if missing_artifacts:
+            feedback = (
+                "[REJECTED]\n"
+                "Missing Required Artifacts:\n"
+                + "\n".join(f"- {artifact}" for artifact in missing_artifacts)
+                + "\n\nTask cannot be marked complete."
+            )
+            logger.info("[LangGraph] QA Review: deterministic required-artifact gate rejected.")
+            return {
+                "reviewer_feedback": feedback,
+                "status": "planning",
+                "messages": [Message(role="assistant", content=f"Reviewer: Rejected. {feedback}")],
+            }
 
         plan_str = plan.goal_summary if plan else "None"
 

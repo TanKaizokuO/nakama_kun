@@ -330,6 +330,19 @@ class TestToolRouter:
         assert result.success
 
     @pytest.mark.anyio
+    async def test_invalid_json_arguments_are_rejected(self) -> None:
+        registry = ToolRegistry()
+        registry.register(_DummyTool())
+        router = ToolRouter(registry)
+
+        result = await router.dispatch("dummy", '{"key": ')
+
+        assert not result.success
+        assert "INVALID_ARGUMENTS" in (result.error or "")
+        assert "Malformed JSON arguments" in (result.error or "")
+        assert "Re-issue the tool call with valid JSON" in (result.error or "")
+
+    @pytest.mark.anyio
     async def test_unknown_tool_raises(self) -> None:
         registry = ToolRegistry()
         router = ToolRouter(registry)
