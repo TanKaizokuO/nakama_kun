@@ -560,7 +560,8 @@ class VerificationLayer:
                         args = {}
                 cmd: str = args.get("cmd", "<unknown>")
 
-                # Extract JSON if present
+                # Extract JSON payload from tool results.
+                # If tool failed, content starts with the 'ERROR: ' prefix, which is stripped here.
                 json_content = content
                 if content.startswith("ERROR: "):
                     json_content = content[len("ERROR: "):]
