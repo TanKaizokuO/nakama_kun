@@ -86,6 +86,8 @@ def make_planner_node(planner_service: PlannerService) -> Callable[[AgentState],
                                 f"- Command failed: '{cr.cmd}' (Exit code: {cr.exit_code})\n"
                                 f"  Output:\n{stdout_snippet}"
                             )
+            else:
+                logger.warning("[LangGraph] Planner: no verification_report in state during retry.")
 
             prompt_lines = [
                 f"Original Goal: {goal}",
