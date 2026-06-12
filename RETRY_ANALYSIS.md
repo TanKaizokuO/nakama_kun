@@ -26,16 +26,7 @@ During a retry, `planner_node` is invoked with the updated `AgentState`. It dete
 ```python
 feedback = state["reviewer_feedback"]
 ```
-If `feedback` is truthy, it builds the following prompt:
-```python
-prompt = (
-    f"Original Goal: {goal}\n\n"
-    f"We previously attempted this, but a reviewer rejected it with this feedback:\n"
-    f"{feedback}\n\n"
-    f"Please update and refine the implementation plan to address this feedback."
-)
-```
-This prompt is sent to `PlannerService.plan(prompt)`, which forwards it to the LLM.
+If `feedback` is truthy, it builds a prompt containing the feedback and sends it to `PlannerService.plan(prompt)`, which forwards it to the LLM.
 
 ### 4. Why Retries Are Not Adapting
 Before implementing Retry Memory, the planner failed to adapt and repeated the same actions because:
@@ -49,6 +40,20 @@ Before implementing Retry Memory, the planner failed to adapt and repeated the s
 
 To solve the lack of context during replanning, we introduce **Retry Memory** inside `planner_node`. Before generating a new plan, the planner is supplied with a structured representation of the execution context:
 
+```mermaid
+graph TD
+    A[Start] --> B[PlannerNode: Initial Goal]
+    B --> C[ExecutorNode: Runs Tools]
+    C --> D[VerifierNode: Checks Files & Commands]
+    D --> E[ReviewerNode: Evaluates Results]
+    E -->|Approved| F[Final Response Node]
+    E -->|Rejected| G{Retry Count < 3?}
+    G -->|No| F
+    G -->|Yes| H[Extract Retry Memory: Succeeded/Failed Tools & Validations]
+    H --> B
+```
+
+The planner receives:
 1. **Completed Actions**: A list of all successfully executed tool calls and their arguments.
 2. **Previous Failures**: A list of all failed tool calls, their arguments, and their error/output snippets.
 3. **Failed Validations**: A list of all missing artifacts, failed validation commands, and test failures extracted from the `verification_report`.
@@ -77,3 +82,12 @@ We previously attempted this, but the task was not fully successful and requires
 - Command failed: 'pytest' (Exit code: 127)
 ```
 Using this memory, the planner can identify exactly which tools failed, which verification checks were not met, and what needs to be changed in the revised plan to achieve success.
+
+---
+
+## Part 3: Token and Prompt Optimization
+
+To prevent the prompt from growing excessively large and exceeding LLM context windows during multiple retries, the following design constraints are enforced:
+- **Output Snippet Truncation**: Output/Error snippets for failed tool runs are truncated to `200` characters.
+- **Command Output Truncation**: Stdout/stderr output from verification command results are capped at `200` characters.
+- **Deduplication**: Artifact check warnings and existence check warnings are deduplicated by target file path.
