@@ -10,6 +10,7 @@ class Plan(BaseModel):
     goal_summary: str = Field(description="A concise summary of the goal to be achieved.")
     assumptions: list[str] = Field(default_factory=list, description="Assumptions made during planning.")
     ordered_steps: list[str] = Field(default_factory=list, description="Discrete, ordered steps to execute the plan.")
+    required_artifacts: list[str] = Field(default_factory=list, description="List of exact file paths that MUST be created or modified for this plan to be considered complete.")
     risks: list[str] = Field(default_factory=list, description="Potential risks or pitfalls.")
     validation_checklist: list[str] = Field(default_factory=list, description="A checklist of items to verify completion.")
     targets: list[str] = Field(default_factory=list, description="Optional target files or modules involved.")

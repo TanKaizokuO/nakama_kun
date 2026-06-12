@@ -25,7 +25,11 @@ class ToolResult(BaseModel):
         """Render the result as a plain-text tool-result message content."""
         if self.success:
             return self.output or ""
-        return f"ERROR: {self.error or 'unknown error'}"
+        error = self.error or self.output or "unknown error"
+        content = f"ERROR: {error}"
+        if self.output and self.output != error:
+            content += f"\n\nOutput:\n{self.output}"
+        return content
 
 
 class BaseTool(ABC):

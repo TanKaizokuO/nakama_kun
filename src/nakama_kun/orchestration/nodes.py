@@ -16,6 +16,83 @@ from nakama_kun.orchestration.evidence import build_evidence_store
 from nakama_kun.orchestration.state import AgentState
 from nakama_kun.orchestration.verification import VerificationLayer
 from nakama_kun.tools import ToolRegistry, ToolRouter
+from nakama_kun.tools.interfaces import ToolResult
+
+
+def _normalize_tool_arguments(arguments: dict[str, Any] | str) -> str:
+    """Return a stable representation for duplicate tool-call detection."""
+    if isinstance(arguments, str):
+        try:
+            parsed = json.loads(arguments)
+        except json.JSONDecodeError:
+            parsed = arguments
+    else:
+        parsed = arguments
+    return json.dumps(parsed, sort_keys=True, ensure_ascii=False, default=str)
+
+
+def _tool_call_key(name: str, arguments: dict[str, Any] | str) -> tuple[str, str]:
+    return name, _normalize_tool_arguments(arguments)
+
+
+def _extract_tool_error(result: ToolResult, content: str) -> str:
+    if result.error:
+        return result.error
+    if result.output:
+        return result.output
+    return content.removeprefix("ERROR: ").strip() or "unknown error"
+
+
+def _render_tool_observation(
+    name: str,
+    success: bool,
+    content: str,
+    error: str | None = None,
+) -> str:
+    if success:
+        return content
+
+    reason = error or content.removeprefix("ERROR: ").strip() or "unknown error"
+    details = []
+    if content and content != reason and content != f"ERROR: {reason}":
+        details = ["", "Tool Output:", content]
+
+    return "\n".join(
+        [
+            f"Tool: {name}",
+            "Status: FAILED",
+            "",
+            "Reason:",
+            reason,
+            *details,
+            "",
+            "Replanning Required:",
+            "What failed? Why did it fail? What should be changed?",
+            "Do not repeat the same action. Revise the solution before another tool call.",
+        ]
+    )
+
+
+def _build_attempt_history(
+    tool_results: list[dict[str, Any]],
+) -> dict[tuple[str, str], dict[str, Any]]:
+    history: dict[tuple[str, str], dict[str, Any]] = {}
+    for entry in tool_results:
+        name = entry.get("tool", "")
+        arguments = entry.get("arguments", {})
+        key = _tool_call_key(name, arguments)
+        record = history.setdefault(
+            key,
+            {
+                "attempt_count": 0,
+                "last_result": None,
+                "last_error": None,
+            },
+        )
+        record["attempt_count"] += 1
+        record["last_result"] = entry.get("success", False)
+        record["last_error"] = entry.get("error") or entry.get("content")
+    return history
 
 
 def make_planner_node(planner_service: PlannerService) -> Callable[[AgentState], Any]:
@@ -44,16 +121,23 @@ def make_planner_node(planner_service: PlannerService) -> Callable[[AgentState],
 
             # Extract previous failures (failed tool runs)
             previous_failures = []
+            user_rejections = []
             for r in state.get("tool_results", []):
                 if not r.get("success", False):
                     tool_name = r.get("tool", "")
                     arguments = r.get("arguments", {})
+                    error = r.get("error") or ""
                     content = r.get("content", "")
-                    content_snippet = content[:200] + "..." if len(content) > 200 else content
+                    failure_text = error or content
+                    content_snippet = failure_text[:200] + "..." if len(failure_text) > 200 else failure_text
                     previous_failures.append(
                         f"- Tool '{tool_name}' failed with args: {json.dumps(arguments)}\n"
                         f"  Output/Error: {content_snippet}"
                     )
+                    if "rejected" in failure_text.lower():
+                        user_rejections.append(
+                            f"- User rejected tool '{tool_name}' with args: {json.dumps(arguments)}"
+                        )
 
             # Extract failed validations from verification report
             failed_validations = []
@@ -104,6 +188,10 @@ def make_planner_node(planner_service: PlannerService) -> Callable[[AgentState],
                 "### Previous Failures",
                 "\n".join(previous_failures) if previous_failures else "(none)",
                 "",
+                "### User-Rejection Awareness",
+                "\n".join(user_rejections) if user_rejections else "(none)",
+                "If the user rejected proposed file content, you must either modify the content, ask for clarification, or choose a different approach. Do not resubmit identical content.",
+                "",
                 "### Failed Validations",
                 "\n".join(failed_validations) if failed_validations else "(none)",
                 "",
@@ -119,10 +207,14 @@ def make_planner_node(planner_service: PlannerService) -> Callable[[AgentState],
 
         plan, raw_text = await planner_service.plan(prompt)
 
+        required_artifacts = plan.required_artifacts if plan and hasattr(plan, "required_artifacts") else []
+
         return {
             "plan": plan,
             "status": "executing",
             "retry_count": retry_count,
+            "required_artifacts": required_artifacts,
+            "created_artifacts": [],
             "messages": [
                 Message(role="assistant", content=f"Planner proposed Plan:\n{raw_text}")
             ],
@@ -168,15 +260,38 @@ def make_executor_node(
 
         logger.info(f"[LangGraph] Calling LLM with {len(messages)} messages...")
 
-        # Run up to 10 rounds of tool calling per executor invocation
         max_rounds = 10
         new_messages: list[Message] = []
         new_tool_results: list[dict[str, Any]] = []
+        attempt_history = _build_attempt_history(state.get("tool_results", []))
+
+        required_artifacts = state.get("required_artifacts", [])
+        created_artifacts = list(state.get("created_artifacts", []))
 
         for round_idx in range(1, max_rounds + 1):
             logger.info(f"[LangGraph] Executor Round {round_idx}/{max_rounds}...")
+
+            missing_artifacts = list(set(required_artifacts) - set(created_artifacts))
+            current_messages = messages + new_messages
+
+            if missing_artifacts:
+                if round_idx >= max_rounds - 2:
+                    warning_msg = Message(
+                        role="system",
+                        content=f"CRITICAL WARNING: Execution budget nearly exhausted ({round_idx}/{max_rounds}). "
+                                f"You MUST immediately create or modify the following required artifacts: {missing_artifacts}. "
+                                f"Do NOT explore the repository further."
+                    )
+                    current_messages.append(warning_msg)
+                else:
+                    status_msg = Message(
+                        role="system",
+                        content=f"Missing required artifacts: {missing_artifacts}. You must eventually create them to complete the task."
+                    )
+                    current_messages.append(status_msg)
+
             response = await chat_service.chat_with_tools(
-                messages + new_messages, tool_schemas
+                current_messages, tool_schemas
             )
 
             # Check if execution finished
@@ -199,37 +314,87 @@ def make_executor_node(
             for tc in response.tool_calls:
                 name = tc.function.get("name", "")
                 arguments = tc.function.get("arguments", {})
+                key = _tool_call_key(name, arguments)
+                previous_attempt = attempt_history.get(key)
 
                 logger.info(f"[LangGraph] Dispatching tool {name} with args: {arguments}")
-                try:
-                    result = await tool_router.dispatch(name, arguments)
+                if round_idx >= max_rounds - 2 and missing_artifacts and name not in ["write_file", "run_command", "replace_file_content", "multi_replace_file_content", "ask_permission"]:
+                    error = (
+                        f"BUDGET EXHAUSTED: Tool '{name}' is blocked. Only write operations and commands "
+                        f"are allowed. You MUST create the missing artifacts: {missing_artifacts}"
+                    )
+                    result = ToolResult(success=False, error=error)
                     success = result.success
                     content = result.to_content()
-                except Exception as exc:
-                    logger.error(f"[LangGraph] Tool execution failed: {exc}")
-                    success = False
-                    content = f"ERROR: {exc}"
+                    logger.warning(
+                        f"[LangGraph] Blocked tool call {name} due to budget exhaustion."
+                    )
+                elif previous_attempt and previous_attempt.get("last_result") is False:
+                    error = (
+                        "Identical tool call already failed. "
+                        "Modify the approach before retrying."
+                    )
+                    result = ToolResult(success=False, error=error)
+                    success = result.success
+                    content = result.to_content()
+                    logger.warning(
+                        f"[LangGraph] Blocked repeated failed tool call {name} "
+                        f"attempt={previous_attempt['attempt_count'] + 1}"
+                    )
+                else:
+                    try:
+                        result = await tool_router.dispatch(name, arguments)
+                        success = result.success
+                        content = result.to_content()
+                    except Exception as exc:
+                        logger.error(f"[LangGraph] Tool execution failed: {exc}")
+                        result = ToolResult(success=False, error=str(exc))
+                        success = False
+                        content = result.to_content()
+
+                error = _extract_tool_error(result, content) if not success else None
+                observation = _render_tool_observation(name, success, content, error)
+                attempt_count = (previous_attempt["attempt_count"] if previous_attempt else 0) + 1
+                attempt_history[key] = {
+                    "attempt_count": attempt_count,
+                    "last_result": success,
+                    "last_error": error,
+                }
 
                 tool_result_msg = Message(
                     role="tool",
-                    content=content,
+                    content=observation,
                     tool_call_id=tc.id,
                     name=name,
                 )
                 new_messages.append(tool_result_msg)
+
+                if success and name in ["write_file", "replace_file_content", "multi_replace_file_content"]:
+                    from nakama_kun.orchestration.verification import _extract_paths_from_arguments, _extract_path_from_write_output
+                    paths = _extract_paths_from_arguments(arguments)
+                    if not paths:
+                        extracted = _extract_path_from_write_output(content)
+                        if extracted:
+                            paths = [extracted]
+                    for p in paths:
+                        if p not in created_artifacts:
+                            created_artifacts.append(p)
 
                 new_tool_results.append(
                     {
                         "tool": name,
                         "arguments": arguments,
                         "success": success,
-                        "content": content,
+                        "content": observation,
+                        "error": error,
+                        "attempt_count": attempt_count,
                     }
                 )
 
         return {
             "messages": new_messages,
             "tool_results": new_tool_results,
+            "created_artifacts": created_artifacts,
             "status": "reviewing",
         }
 

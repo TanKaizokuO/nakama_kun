@@ -158,6 +158,7 @@ class VerificationReport:
         command_results: list[CommandResult],
         workspace_snapshot: list[str],
         summary: str,
+        required_artifacts: list[str] = None,
     ) -> None:
         self.files_created = files_created
         self.files_modified = files_modified
@@ -165,6 +166,7 @@ class VerificationReport:
         self.command_results = command_results
         self.workspace_snapshot = workspace_snapshot
         self.summary = summary
+        self.required_artifacts = required_artifacts or []
 
     # ------------------------------------------------------------------
     # Outcome pre-classification
@@ -238,8 +240,24 @@ class VerificationReport:
                 total_error_tests += cr.test_summary["errors"]
                 total_skipped_tests += cr.test_summary["skipped"]
 
+        # --- check required artifacts explicitly ---
+        missing_required = []
+        if self.required_artifacts:
+            existing_full_paths = {fa.path for fa in existing_artifacts}
+            for req in self.required_artifacts:
+                found = False
+                for ep in existing_full_paths:
+                    if ep.endswith(req) or Path(ep).name == Path(req).name:
+                        found = True
+                        break
+                if not found:
+                    missing_required.append(req)
+
         # --- apply hierarchy ---
-        if artifacts_exist and not any_test_failed:
+        if missing_required:
+            rec = "REJECT"
+            reason = f"Execution finished but required artifact(s) are missing: {', '.join(missing_required)}"
+        elif artifacts_exist and not any_test_failed:
             rec = "APPROVE"
             if has_tests:
                 test_details = f"; Tests: {total_passed_tests} passed, {total_failed_tests} failed, {total_error_tests} errors, {total_skipped_tests} skipped"
@@ -664,4 +682,5 @@ class VerificationLayer:
             command_results=command_results,
             workspace_snapshot=workspace_snapshot,
             summary=summary,
+            required_artifacts=state.get("required_artifacts", []),
         )

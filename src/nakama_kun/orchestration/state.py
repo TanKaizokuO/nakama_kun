@@ -18,6 +18,24 @@ class AgentState(TypedDict):
     # The structured plan built by the Planner node
     plan: Plan | None
 
+    # The list of artifacts that must be created for the task to be considered complete
+    required_artifacts: list[str]
+
+    # The list of artifacts that have been created so far during the execution phase
+    created_artifacts: list[str]
+
+    # Required artifacts that still need to be created before completion.
+    missing_artifacts: list[str]
+
+    # Remaining repository-exploration budget before delivery becomes mandatory.
+    research_budget_remaining: int
+
+    # True once the executor must stop exploring and create the required outputs.
+    delivery_mode: bool
+
+    # Retry memory passed back to the planner after rejections.
+    retry_memory: RetryMemory
+
     # The running log of LLM chat messages (accumulates over node execution)
     messages: Annotated[list[Message], operator.add]
 
@@ -43,3 +61,13 @@ class AgentState(TypedDict):
 
     # Current execution phase status: planning, executing, reviewing, done, failed
     status: str
+
+
+class RetryMemory(TypedDict):
+    """Stateful memory used to prevent repeated failed strategies across retries."""
+
+    completed_actions: list[str]
+    failed_actions: list[str]
+    failed_validations: list[str]
+    reviewer_feedback: list[str]
+    failed_attempt_signatures: list[str]
