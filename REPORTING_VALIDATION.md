@@ -39,3 +39,18 @@ The summary prompt now includes a `### STRUCTURED METRICS` section:
 ```
 
 The prompt instructs the LLM that it must **only** cite the values in this metadata block, and forbids it from inferring or inventing other values.
+
+---
+
+## Part 3: Test Verification Results
+
+To validate the grounding logic, we created three regression/unit tests in [test_reporting_grounding.py](file:///home/tankaizokuo/Code/TanClaw/tests/test_reporting_grounding.py):
+1. **`test_final_response_grounding_with_report`**: Verifies that when a structured `VerificationReport` exists, the node parses the metrics block correctly, formatting created/modified files (filtering out non-existent ones), counting tests (e.g., passed, failed, skipped), and appending the first 20 workspace files. It verifies that the generated prompt strictly requires the LLM to trust only these values.
+2. **`test_final_response_grounding_fallback_no_report`**: Verifies the fallback behavior when the verification report is missing. It parses `tool_results` to find created files and matches command execution outputs (like pytest summaries) to extract counts (e.g. 5 passed, 0 failed).
+3. **`test_final_response_grounding_fallback_no_files_no_tests`**: Confirms that when no files were written and no test suites were executed (e.g., in a read-only code-inspection task), the system cleanly outputs `No test suites were run` and lists files created/modified as `(none)`.
+
+### Test Suite Execution
+We ran the grounding tests and the entire suite to verify correct execution:
+- Grounding tests: `uv run pytest tests/test_reporting_grounding.py -v` (3/3 passed).
+- Complete test suite: `uv run pytest` (171/171 passed).
+
