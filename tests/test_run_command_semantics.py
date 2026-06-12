@@ -108,3 +108,28 @@ def test_verification_layer_parses_json() -> None:
     assert cr2.success is False  # Derived from exit_code or test parser
     assert "1 passed, 1 failed" in cr2.stdout_snippet
     assert "warning: deprecation" in cr2.stdout_snippet
+
+
+@pytest.mark.anyio
+async def test_run_command_truncation(tmp_path: object) -> None:
+    tool = RunCommandTool(cwd=str(tmp_path))
+    # Make a very long string exceeding _MAX_OUTPUT_CHARS (8000)
+    large_cmd = "python3 -c 'print(\"x\" * 10000)'"
+    result = await tool.execute(cmd=large_cmd)
+    assert result.success
+
+    data = json.loads(result.output)
+    # Check that stdout has been truncated and contains the truncation marker
+    assert len(data["stdout"]) < 10000
+    assert "truncated" in data["stdout"]
+
+
+@pytest.mark.anyio
+async def test_run_command_mixed_outputs(tmp_path: object) -> None:
+    tool = RunCommandTool(cwd=str(tmp_path))
+    result = await tool.execute(cmd="echo 'stdout stream' && echo 'stderr stream' >&2")
+    assert result.success
+
+    data = json.loads(result.output)
+    assert "stdout stream" in data["stdout"]
+    assert "stderr stream" in data["stderr"]
