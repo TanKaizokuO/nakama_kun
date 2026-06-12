@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -170,7 +169,9 @@ def build_evidence_store(
 
         # Preserve read_file and write_file contents at time of execution
         if tool_name == "read_file" and success:
-            from nakama_kun.orchestration.verification import _extract_paths_from_arguments
+            from nakama_kun.orchestration.verification import (
+                _extract_paths_from_arguments,
+            )
 
             paths = _extract_paths_from_arguments(arguments)
             for path in paths:
