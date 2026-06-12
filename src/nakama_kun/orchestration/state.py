@@ -5,6 +5,7 @@ from typing import Annotated, Any, TypedDict
 
 from nakama_kun.ai.models.message import Message
 from nakama_kun.ai.models.plan import Plan
+from nakama_kun.orchestration.verification import VerificationReport
 
 
 class AgentState(TypedDict):
@@ -21,6 +22,11 @@ class AgentState(TypedDict):
 
     # Log of tools that were run during the task
     tool_results: Annotated[list[dict[str, Any]], operator.add]
+
+    # Structured workspace verification snapshot produced by the Verifier node.
+    # Contains real file contents, command exit codes, and workspace listings —
+    # the Reviewer evaluates this instead of raw tool summaries.
+    verification_report: VerificationReport | None
 
     # Feedback from the Reviewer node if work needs adjustment
     reviewer_feedback: str | None

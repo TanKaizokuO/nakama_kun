@@ -240,7 +240,7 @@ class AgentMode(BaseMode):
                 logger.warning(f"Failed to log task failure: {e}")
             raise exc
 
-    def _execute_tool_call(self, tc: ToolCall) -> str:
+    async def _execute_tool_call(self, tc: ToolCall) -> str:
         """Dispatch a single ``ToolCall`` and return the result as a string."""
         import json
 
@@ -255,7 +255,7 @@ class AgentMode(BaseMode):
         )
 
         try:
-            result = self._router.dispatch(name, arguments)
+            result = await self._router.dispatch(name, arguments)
         except ToolError as exc:
             console.print(f"[yellow]  ✗ Tool '{name}' error: {exc}[/yellow]")
             return f"ERROR: {exc}"

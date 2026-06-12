@@ -66,29 +66,33 @@ class TestAssertWithinWorkspace:
 
 
 class TestReadFileTool:
-    def test_reads_existing_file(self, tmp_path: Path) -> None:
+    @pytest.mark.anyio
+    async def test_reads_existing_file(self, tmp_path: Path) -> None:
         target = tmp_path / "hello.txt"
         target.write_text("hello, world", encoding="utf-8")
         tool = ReadFileTool(str(tmp_path))
-        result = tool.execute(path=str(target))
+        result = await tool.execute(path=str(target))
         assert result.success
         assert result.output == "hello, world"
 
-    def test_missing_file_returns_error(self, tmp_path: Path) -> None:
+    @pytest.mark.anyio
+    async def test_missing_file_returns_error(self, tmp_path: Path) -> None:
         tool = ReadFileTool(str(tmp_path))
-        result = tool.execute(path=str(tmp_path / "ghost.txt"))
+        result = await tool.execute(path=str(tmp_path / "ghost.txt"))
         assert not result.success
         assert result.error is not None
 
-    def test_path_escape_returns_error(self, tmp_path: Path) -> None:
+    @pytest.mark.anyio
+    async def test_path_escape_returns_error(self, tmp_path: Path) -> None:
         tool = ReadFileTool(str(tmp_path))
-        result = tool.execute(path="/etc/passwd")
+        result = await tool.execute(path="/etc/passwd")
         assert not result.success
         assert "outside" in (result.error or "").lower()
 
-    def test_missing_path_arg_returns_error(self, tmp_path: Path) -> None:
+    @pytest.mark.anyio
+    async def test_missing_path_arg_returns_error(self, tmp_path: Path) -> None:
         tool = ReadFileTool(str(tmp_path))
-        result = tool.execute()
+        result = await tool.execute()
         assert not result.success
 
 
@@ -98,28 +102,32 @@ class TestReadFileTool:
 
 
 class TestWriteFileTool:
-    def test_writes_new_file(self, tmp_path: Path) -> None:
+    @pytest.mark.anyio
+    async def test_writes_new_file(self, tmp_path: Path) -> None:
         tool = WriteFileTool(str(tmp_path))
         target = tmp_path / "output.txt"
-        result = tool.execute(path=str(target), content="nakama!")
+        result = await tool.execute(path=str(target), content="nakama!")
         assert result.success
         assert target.read_text() == "nakama!"
 
-    def test_creates_parent_directories(self, tmp_path: Path) -> None:
+    @pytest.mark.anyio
+    async def test_creates_parent_directories(self, tmp_path: Path) -> None:
         tool = WriteFileTool(str(tmp_path))
         target = tmp_path / "a" / "b" / "c.txt"
-        result = tool.execute(path=str(target), content="deep")
+        result = await tool.execute(path=str(target), content="deep")
         assert result.success
         assert target.exists()
 
-    def test_path_escape_returns_error(self, tmp_path: Path) -> None:
+    @pytest.mark.anyio
+    async def test_path_escape_returns_error(self, tmp_path: Path) -> None:
         tool = WriteFileTool(str(tmp_path))
-        result = tool.execute(path="/etc/hacked.txt", content="x")
+        result = await tool.execute(path="/etc/hacked.txt", content="x")
         assert not result.success
 
-    def test_missing_path_returns_error(self, tmp_path: Path) -> None:
+    @pytest.mark.anyio
+    async def test_missing_path_returns_error(self, tmp_path: Path) -> None:
         tool = WriteFileTool(str(tmp_path))
-        result = tool.execute(content="no path")
+        result = await tool.execute(content="no path")
         assert not result.success
 
 
@@ -129,32 +137,36 @@ class TestWriteFileTool:
 
 
 class TestListFilesTool:
-    def test_lists_directory(self, tmp_path: Path) -> None:
+    @pytest.mark.anyio
+    async def test_lists_directory(self, tmp_path: Path) -> None:
         (tmp_path / "alpha.py").write_text("", encoding="utf-8")
         (tmp_path / "subdir").mkdir()
         tool = ListFilesTool(str(tmp_path))
-        result = tool.execute(path=str(tmp_path))
+        result = await tool.execute(path=str(tmp_path))
         assert result.success
         assert "alpha.py" in (result.output or "")
         assert "subdir" in (result.output or "")
 
-    def test_empty_directory(self, tmp_path: Path) -> None:
+    @pytest.mark.anyio
+    async def test_empty_directory(self, tmp_path: Path) -> None:
         tool = ListFilesTool(str(tmp_path))
-        result = tool.execute(path=str(tmp_path))
+        result = await tool.execute(path=str(tmp_path))
         assert result.success
         assert "empty" in (result.output or "").lower()
 
-    def test_non_directory_returns_error(self, tmp_path: Path) -> None:
+    @pytest.mark.anyio
+    async def test_non_directory_returns_error(self, tmp_path: Path) -> None:
         f = tmp_path / "file.txt"
         f.write_text("x")
         tool = ListFilesTool(str(tmp_path))
-        result = tool.execute(path=str(f))
+        result = await tool.execute(path=str(f))
         assert not result.success
 
-    def test_defaults_to_workspace_root(self, tmp_path: Path) -> None:
+    @pytest.mark.anyio
+    async def test_defaults_to_workspace_root(self, tmp_path: Path) -> None:
         (tmp_path / "readme.md").write_text("hello")
         tool = ListFilesTool(str(tmp_path))
-        result = tool.execute()  # no path argument
+        result = await tool.execute()  # no path argument
         assert result.success
         assert "readme.md" in (result.output or "")
 
@@ -165,31 +177,35 @@ class TestListFilesTool:
 
 
 class TestSearchFilesTool:
-    def test_finds_matching_lines(self, tmp_path: Path) -> None:
+    @pytest.mark.anyio
+    async def test_finds_matching_lines(self, tmp_path: Path) -> None:
         f = tmp_path / "code.py"
         f.write_text("def hello():\n    pass\n", encoding="utf-8")
         tool = SearchFilesTool(str(tmp_path))
-        result = tool.execute(query="def hello")
+        result = await tool.execute(query="def hello")
         assert result.success
         assert "code.py" in (result.output or "")
         assert "def hello" in (result.output or "")
 
-    def test_no_match_returns_success_with_message(self, tmp_path: Path) -> None:
+    @pytest.mark.anyio
+    async def test_no_match_returns_success_with_message(self, tmp_path: Path) -> None:
         (tmp_path / "empty.py").write_text("", encoding="utf-8")
         tool = SearchFilesTool(str(tmp_path))
-        result = tool.execute(query="xyz_does_not_exist_abc")
+        result = await tool.execute(query="xyz_does_not_exist_abc")
         assert result.success
         assert "no matches" in (result.output or "").lower()
 
-    def test_invalid_regex_returns_error(self, tmp_path: Path) -> None:
+    @pytest.mark.anyio
+    async def test_invalid_regex_returns_error(self, tmp_path: Path) -> None:
         tool = SearchFilesTool(str(tmp_path))
-        result = tool.execute(query="[invalid regex")
+        result = await tool.execute(query="[invalid regex")
         assert not result.success
         assert "regex" in (result.error or "").lower()
 
-    def test_missing_query_returns_error(self, tmp_path: Path) -> None:
+    @pytest.mark.anyio
+    async def test_missing_query_returns_error(self, tmp_path: Path) -> None:
         tool = SearchFilesTool(str(tmp_path))
-        result = tool.execute()
+        result = await tool.execute()
         assert not result.success
 
 
@@ -199,28 +215,32 @@ class TestSearchFilesTool:
 
 
 class TestRunCommandTool:
-    def test_successful_command(self, tmp_path: Path) -> None:
+    @pytest.mark.anyio
+    async def test_successful_command(self, tmp_path: Path) -> None:
         tool = RunCommandTool(cwd=str(tmp_path))
-        result = tool.execute(cmd="echo hello")
+        result = await tool.execute(cmd="echo hello")
         assert result.success
         assert "hello" in (result.output or "")
 
-    def test_failing_command(self, tmp_path: Path) -> None:
+    @pytest.mark.anyio
+    async def test_failing_command(self, tmp_path: Path) -> None:
         tool = RunCommandTool(cwd=str(tmp_path))
-        result = tool.execute(cmd="exit 42")
+        result = await tool.execute(cmd="exit 42")
         assert not result.success
         assert "42" in (result.output or "")
 
-    def test_timeout_raises_command_timeout_error(self, tmp_path: Path) -> None:
+    @pytest.mark.anyio
+    async def test_timeout_raises_command_timeout_error(self, tmp_path: Path) -> None:
         tool = RunCommandTool(cwd=str(tmp_path))
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired(cmd="sleep 99", timeout=1)
             with pytest.raises(CommandTimeoutError):
-                tool.execute(cmd="sleep 99", timeout=1)
+                await tool.execute(cmd="sleep 99", timeout=1)
 
-    def test_missing_cmd_returns_error(self, tmp_path: Path) -> None:
+    @pytest.mark.anyio
+    async def test_missing_cmd_returns_error(self, tmp_path: Path) -> None:
         tool = RunCommandTool(cwd=str(tmp_path))
-        result = tool.execute()
+        result = await tool.execute()
         assert not result.success
 
 
@@ -234,7 +254,7 @@ class _DummyTool(BaseTool):
     description = "A dummy test tool."
     parameters: dict = {"type": "object", "properties": {}, "required": []}
 
-    def execute(self, **kwargs: object) -> ToolResult:
+    async def execute(self, **kwargs: object) -> ToolResult:
         return ToolResult(success=True, output="dummy result")
 
 
@@ -266,7 +286,7 @@ class TestToolRegistry:
             description = ""
             parameters: dict = {"type": "object", "properties": {}, "required": []}
 
-            def execute(self, **kwargs: object) -> ToolResult:
+            async def execute(self, **kwargs: object) -> ToolResult:
                 return ToolResult(success=True)
 
         registry.register(_DummyTool())
@@ -292,28 +312,32 @@ class TestToolRegistry:
 
 
 class TestToolRouter:
-    def test_dispatches_known_tool(self) -> None:
+    @pytest.mark.anyio
+    async def test_dispatches_known_tool(self) -> None:
         registry = ToolRegistry()
         registry.register(_DummyTool())
         router = ToolRouter(registry)
-        result = router.dispatch("dummy", {})
+        result = await router.dispatch("dummy", {})
         assert result.success
         assert result.output == "dummy result"
 
-    def test_dispatches_with_json_string_args(self) -> None:
+    @pytest.mark.anyio
+    async def test_dispatches_with_json_string_args(self) -> None:
         registry = ToolRegistry()
         registry.register(_DummyTool())
         router = ToolRouter(registry)
-        result = router.dispatch("dummy", '{"key": "value"}')
+        result = await router.dispatch("dummy", '{"key": "value"}')
         assert result.success
 
-    def test_unknown_tool_raises(self) -> None:
+    @pytest.mark.anyio
+    async def test_unknown_tool_raises(self) -> None:
         registry = ToolRegistry()
         router = ToolRouter(registry)
         with pytest.raises(UnknownToolError):
-            router.dispatch("unknown_tool", {})
+            await router.dispatch("unknown_tool", {})
 
-    def test_tool_exception_returns_error_result(self) -> None:
+    @pytest.mark.anyio
+    async def test_tool_exception_returns_error_result(self) -> None:
         """If a tool raises unexpectedly, the router returns a ToolResult with success=False."""
 
         class BrokenTool(BaseTool):
@@ -321,12 +345,12 @@ class TestToolRouter:
             description = "always raises"
             parameters: dict = {"type": "object", "properties": {}, "required": []}
 
-            def execute(self, **kwargs: object) -> ToolResult:
+            async def execute(self, **kwargs: object) -> ToolResult:
                 raise RuntimeError("internal boom")
 
         registry = ToolRegistry()
         registry.register(BrokenTool())
         router = ToolRouter(registry)
-        result = router.dispatch("broken", {})
+        result = await router.dispatch("broken", {})
         assert not result.success
         assert "internal boom" in (result.error or "")

@@ -32,7 +32,7 @@ class ReadFileTool(BaseTool):
     def __init__(self, workspace_root: str | None = None) -> None:
         self._workspace_root = workspace_root or os.getcwd()
 
-    def execute(self, **kwargs: Any) -> ToolResult:  # noqa: ANN401
+    async def execute(self, **kwargs: Any) -> ToolResult:  # noqa: ANN401
         path: str = kwargs.get("path", "")
         if not path:
             return ToolResult(success=False, error="'path' argument is required.")

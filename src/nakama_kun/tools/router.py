@@ -23,7 +23,7 @@ class ToolRouter:
     def __init__(self, registry: ToolRegistry) -> None:
         self._registry = registry
 
-    def dispatch(self, name: str, arguments: dict[str, Any] | str) -> ToolResult:
+    async def dispatch(self, name: str, arguments: dict[str, Any] | str) -> ToolResult:
         """Look up *name* in the registry and call ``execute(**arguments)``.
 
         Args:
@@ -49,7 +49,7 @@ class ToolRouter:
         tool = self._registry.get(name)  # raises UnknownToolError if missing
 
         try:
-            result = tool.execute(**parsed_args)
+            result = await tool.execute(**parsed_args)
         except Exception as exc:  # noqa: BLE001
             logger.error(f"Tool '{name}' raised an unexpected error: {exc}")
             result = ToolResult(success=False, error=str(exc))

@@ -30,6 +30,29 @@ class AppConfig:
     modes: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
+def find_env_file() -> str:
+    """Locate a `.env` file by searching parent directories of CWD and the project package structure."""
+    import os
+    from pathlib import Path
+
+    # 1. Search upwards from Current Working Directory
+    cwd = Path(os.getcwd()).resolve()
+    for parent in [cwd] + list(cwd.parents):
+        env_path = parent / ".env"
+        if env_path.is_file():
+            return str(env_path)
+
+    # 2. Search upwards from the package root directory
+    pkg_file = Path(__file__).resolve()
+    for parent in list(pkg_file.parents):
+        env_path = parent / ".env"
+        if env_path.is_file():
+            return str(env_path)
+
+    return ".env"  # Default fallback
+
+
 def get_default_config() -> AppConfig:
     """Return the default application configuration."""
     return AppConfig()
+

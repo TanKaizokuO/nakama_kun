@@ -46,7 +46,7 @@ class BaseTool(ABC):
     parameters: dict[str, Any]
 
     @abstractmethod
-    def execute(self, **kwargs: Any) -> ToolResult:
+    async def execute(self, **kwargs: Any) -> ToolResult:
         """Run the tool and return a structured result."""
         ...
 

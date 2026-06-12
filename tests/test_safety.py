@@ -38,7 +38,8 @@ def test_safety_manager_diff_update(tmp_path: Path) -> None:
     assert "+updated text" in proposal.diff_text
 
 
-def test_safety_manager_apply_and_reject(tmp_path: Path) -> None:
+@pytest.mark.anyio
+async def test_safety_manager_apply_and_reject(tmp_path: Path) -> None:
     manager = SafetyManager(workspace_root=tmp_path)
     file_path = tmp_path / "target.txt"
 
@@ -46,27 +47,28 @@ def test_safety_manager_apply_and_reject(tmp_path: Path) -> None:
     proposal = manager.propose_change(file_path, "some content")
 
     # 1. Reject
-    applied = manager.apply_proposal(proposal, AutoApprovalProvider(approve=False))
+    applied = await manager.apply_proposal(proposal, AutoApprovalProvider(approve=False))
     assert not applied
     assert not file_path.exists()
     assert len(manager.history) == 0
 
     # 2. Approve
-    applied = manager.apply_proposal(proposal, AutoApprovalProvider(approve=True))
+    applied = await manager.apply_proposal(proposal, AutoApprovalProvider(approve=True))
     assert applied
     assert file_path.exists()
     assert file_path.read_text(encoding="utf-8") == "some content"
     assert len(manager.history) == 1
 
 
-def test_safety_manager_rollback_creation(tmp_path: Path) -> None:
+@pytest.mark.anyio
+async def test_safety_manager_rollback_creation(tmp_path: Path) -> None:
     manager = SafetyManager(workspace_root=tmp_path)
     file_path = tmp_path / "created.txt"
 
     proposal = manager.propose_change(file_path, "new file content")
     
     # Apply change
-    manager.apply_proposal(proposal, AutoApprovalProvider(approve=True))
+    await manager.apply_proposal(proposal, AutoApprovalProvider(approve=True))
     assert file_path.exists()
 
     # Rollback should delete it
@@ -76,13 +78,14 @@ def test_safety_manager_rollback_creation(tmp_path: Path) -> None:
     assert len(manager.history) == 0
 
 
-def test_safety_manager_rollback_update(tmp_path: Path) -> None:
+@pytest.mark.anyio
+async def test_safety_manager_rollback_update(tmp_path: Path) -> None:
     manager = SafetyManager(workspace_root=tmp_path)
     file_path = tmp_path / "file.txt"
     file_path.write_text("v1 content", encoding="utf-8")
 
     proposal = manager.propose_change(file_path, "v2 content")
-    manager.apply_proposal(proposal, AutoApprovalProvider(approve=True))
+    await manager.apply_proposal(proposal, AutoApprovalProvider(approve=True))
     assert file_path.read_text(encoding="utf-8") == "v2 content"
 
     # Rollback should restore v1 content
@@ -100,7 +103,8 @@ def test_safety_manager_path_escape(tmp_path: Path) -> None:
         manager.propose_change(outside_path, "content")
 
 
-def test_write_file_tool_safety_integration(tmp_path: Path) -> None:
+@pytest.mark.anyio
+async def test_write_file_tool_safety_integration(tmp_path: Path) -> None:
     # Set up WriteFileTool with AutoApprovalProvider and SafetyManager
     manager = SafetyManager(workspace_root=tmp_path)
     reject_provider = AutoApprovalProvider(approve=False)
@@ -114,7 +118,7 @@ def test_write_file_tool_safety_integration(tmp_path: Path) -> None:
         safety_manager=manager,
         approval_provider=reject_provider,
     )
-    result = tool_reject.execute(path=str(file_path), content="content")
+    result = await tool_reject.execute(path=str(file_path), content="content")
     assert not result.success
     assert "rejected" in result.error.lower()
     assert not file_path.exists()
@@ -125,7 +129,7 @@ def test_write_file_tool_safety_integration(tmp_path: Path) -> None:
         safety_manager=manager,
         approval_provider=approve_provider,
     )
-    result = tool_approve.execute(path=str(file_path), content="content")
+    result = await tool_approve.execute(path=str(file_path), content="content")
     assert result.success
     assert file_path.exists()
     assert file_path.read_text(encoding="utf-8") == "content"

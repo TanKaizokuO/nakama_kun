@@ -37,7 +37,7 @@ class ListFilesTool(BaseTool):
     def __init__(self, workspace_root: str | None = None) -> None:
         self._workspace_root = workspace_root or os.getcwd()
 
-    def execute(self, **kwargs: Any) -> ToolResult:  # noqa: ANN401
+    async def execute(self, **kwargs: Any) -> ToolResult:  # noqa: ANN401
         path_str: str = kwargs.get("path", ".")
         # Resolve relative paths against workspace_root, not the process cwd
         if not Path(path_str).is_absolute():

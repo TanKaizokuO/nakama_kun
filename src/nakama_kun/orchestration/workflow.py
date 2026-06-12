@@ -12,6 +12,7 @@ from nakama_kun.orchestration.nodes import (
     make_final_response_node,
     make_planner_node,
     make_reviewer_node,
+    make_verifier_node,
 )
 from nakama_kun.orchestration.state import AgentState
 from nakama_kun.tools import ToolRegistry, ToolRouter
@@ -45,6 +46,7 @@ def build_agent_graph(
     planner_service: PlannerService,
     tool_registry: ToolRegistry,
     tool_router: ToolRouter,
+    workspace_root: str | None = None,
 ) -> Any:
     """Build and return compiled StateGraph workflow for Agent execution."""
     workflow = StateGraph(AgentState)
@@ -52,19 +54,23 @@ def build_agent_graph(
     # 1. Create nodes
     planner_node: Any = make_planner_node(planner_service)
     executor_node: Any = make_executor_node(chat_service, tool_registry, tool_router)
+    verifier_node: Any = make_verifier_node(workspace_root)
     reviewer_node: Any = make_reviewer_node(chat_service)
     final_response_node: Any = make_final_response_node(chat_service)
 
     # 2. Add nodes to graph
     workflow.add_node("planner", planner_node)
     workflow.add_node("executor", executor_node)
+    workflow.add_node("verifier", verifier_node)
     workflow.add_node("reviewer", reviewer_node)
     workflow.add_node("final_response", final_response_node)
 
     # 3. Define transitions / edges
     workflow.add_edge(START, "planner")
     workflow.add_edge("planner", "executor")
-    workflow.add_edge("executor", "reviewer")
+    # Verifier inspects the real workspace before the Reviewer evaluates results
+    workflow.add_edge("executor", "verifier")
+    workflow.add_edge("verifier", "reviewer")
 
     # Conditional routing after QA Review
     workflow.add_conditional_edges(

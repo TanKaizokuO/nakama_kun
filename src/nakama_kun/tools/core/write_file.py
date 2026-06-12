@@ -45,7 +45,7 @@ class WriteFileTool(BaseTool):
         self.safety_manager = safety_manager
         self.approval_provider = approval_provider
 
-    def execute(self, **kwargs: Any) -> ToolResult:  # noqa: ANN401
+    async def execute(self, **kwargs: Any) -> ToolResult:  # noqa: ANN401
         path: str = kwargs.get("path", "")
         content: str = kwargs.get("content", "")
         if not path:
@@ -54,7 +54,7 @@ class WriteFileTool(BaseTool):
             if self.safety_manager is not None and self.approval_provider is not None:
                 # Route through safety manager
                 proposal = self.safety_manager.propose_change(path, content)
-                applied = self.safety_manager.apply_proposal(proposal, self.approval_provider)
+                applied = await self.safety_manager.apply_proposal(proposal, self.approval_provider)
                 if not applied:
                     return ToolResult(
                         success=False,

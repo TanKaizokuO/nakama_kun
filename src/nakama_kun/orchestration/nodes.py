@@ -13,6 +13,7 @@ from nakama_kun.ai.prompts.system_prompt import (
 from nakama_kun.ai.services.chat_service import ChatService
 from nakama_kun.ai.services.planner_service import PlannerService
 from nakama_kun.orchestration.state import AgentState
+from nakama_kun.orchestration.verification import VerificationLayer
 from nakama_kun.tools import ToolRegistry, ToolRouter
 
 
@@ -128,7 +129,7 @@ def make_executor_node(
 
                 logger.info(f"[LangGraph] Dispatching tool {name} with args: {arguments}")
                 try:
-                    result = tool_router.dispatch(name, arguments)
+                    result = await tool_router.dispatch(name, arguments)
                     success = result.success
                     content = result.to_content()
                 except Exception as exc:
@@ -162,6 +163,28 @@ def make_executor_node(
     return executor_node
 
 
+def make_verifier_node(workspace_root: str | None = None) -> Callable[[AgentState], Any]:
+    """Factory creating the Verifier Node.
+
+    Verifier node runs between Executor and Reviewer.  It inspects the real
+    workspace — reading written files from disk, extracting command outputs —
+    and stores a structured :class:`~nakama_kun.orchestration.verification.VerificationReport`
+    in state so the Reviewer has concrete evidence to evaluate.
+    """
+    layer = VerificationLayer(workspace_root=workspace_root)
+
+    async def verifier_node(state: AgentState) -> dict[str, Any]:
+        logger.info("[LangGraph] Verifier Node starting...")
+        report = layer.run(state)
+        logger.info(f"[LangGraph] Verifier complete: {report.summary}")
+        return {
+            "verification_report": report,
+            "status": "reviewing",
+        }
+
+    return verifier_node
+
+
 def make_reviewer_node(chat_service: ChatService) -> Callable[[AgentState], Any]:
     """Factory creating the Reviewer Node.
 
@@ -172,37 +195,88 @@ def make_reviewer_node(chat_service: ChatService) -> Callable[[AgentState], Any]
         logger.info("[LangGraph] Reviewer Node starting...")
         goal = state["goal"]
         plan = state["plan"]
-        tool_results = state["tool_results"]
+        verification_report = state.get("verification_report")
 
         plan_str = plan.goal_summary if plan else "None"
-        results_summary = json.dumps(
-            [
-                {
-                    "tool": r["tool"],
-                    "success": r["success"],
-                    "output_chars": len(r["content"]),
-                }
-                for r in tool_results
-            ]
-        )
+
+        # Build evidence block from the VerificationReport when available.
+        # Fall back to a raw tool-count summary only if the verifier was skipped.
+        if verification_report is not None:
+            signal = verification_report.evaluate_outcome()
+            evidence_block = verification_report.to_reviewer_text()
+            signal_header = signal.to_header_text()
+        else:
+            logger.warning(
+                "[LangGraph] Reviewer: no verification_report in state — "
+                "falling back to raw tool summary."
+            )
+            tool_results = state.get("tool_results", [])
+            raw_summary = json.dumps(
+                [
+                    {
+                        "tool": r["tool"],
+                        "success": r["success"],
+                        "output_chars": len(r["content"]),
+                    }
+                    for r in tool_results
+                ]
+            )
+            evidence_block = (
+                f"[No verification report available — raw tool summary:]\n{raw_summary}"
+            )
+            signal_header = (
+                "=== PRE-COMPUTED OUTCOME SIGNAL ===\n"
+                "  Recommendation : ⚠️ UNCERTAIN\n"
+                "  Reason         : No verification report; falling back to tool summary.\n"
+                "=== END OUTCOME SIGNAL ==="
+            )
 
         review_prompt = (
-            f"You are a strict quality control reviewer.\n"
-            f"Assess if the original goal has been fully met by the tool outputs.\n\n"
+            f"You are a quality control reviewer evaluating whether a task has been completed.\n\n"
             f"Original Goal: {goal}\n"
-            f"Proposed Plan: {plan_str}\n"
-            f"Executed Tools Summary: {results_summary}\n\n"
-            f"Please respond exactly in this format:\n"
+            f"Proposed Plan: {plan_str}\n\n"
+            f"--- DECISION HIERARCHY (follow strictly, in priority order) ---\n\n"
+            f"  1. PRIMARY — Artifact Existence (HIGHEST PRIORITY)\n"
+            f"     If the requested files/artifacts exist on disk with appropriate content,\n"
+            f"     the goal has been achieved. This is sufficient to APPROVE.\n"
+            f"     Intermediate tool failures are IRRELEVANT if a fallback produced the artifact.\n\n"
+            f"  2. SECONDARY — Test / Command Results\n"
+            f"     If tests ran and passed (Exit Code 0), this CONFIRMS the artifacts are correct.\n"
+            f"     If tests ran and FAILED (non-zero exit code), this OVERRIDES artifact existence → REJECT.\n\n"
+            f"  3. TERTIARY — Tool Execution History (LOWEST PRIORITY)\n"
+            f"     Intermediate failures (e.g. a first write_file attempt that failed before a\n"
+            f"     successful fallback) are INFORMATIONAL ONLY.\n"
+            f"     A ❌ FAIL on an intermediate tool MUST NOT cause rejection if the final\n"
+            f"     artifact exists on disk. Do not penalise the use of fallback mechanisms.\n\n"
+            f"--- PRE-COMPUTED OUTCOME SIGNAL ---\n"
+            f"A deterministic classifier has already evaluated the evidence using the above\n"
+            f"hierarchy. Trust this signal strongly:\n\n"
+            f"{signal_header}\n\n"
+            f"--- FULL EVIDENCE ---\n"
+            f"{evidence_block}\n\n"
+            f"--- DECISION RULES ---\n"
+            f"APPROVE if:\n"
+            f"  - Outcome signal is APPROVE, OR\n"
+            f"  - Requested artifacts exist on disk AND no tests failed.\n\n"
+            f"REJECT only if you have concrete evidence of failure:\n"
+            f"  - Required files are explicitly confirmed MISSING from disk, OR\n"
+            f"  - A test/validation command exited with a non-zero code, OR\n"
+            f"  - File content is clearly wrong or empty for the stated goal.\n\n"
+            f"Do NOT reject because:\n"
+            f"  - An intermediate tool attempt failed (fallback may have succeeded)\n"
+            f"  - The tool history shows any ❌ markers on non-final steps\n"
+            f"  - You cannot see something that wasn't required\n\n"
+            f"Respond in EXACTLY this format:\n"
             f"If approved:\n"
             f"[APPROVED]\n"
-            f"<Brief approval summary>\n\n"
-            f"If rejected (missing features, syntax errors, test failures):\n"
+            f"<One paragraph citing the key evidence: which files exist, which tests passed>\n\n"
+            f"If rejected:\n"
             f"[REJECTED]\n"
-            f"<Explain what is missing or failed in a detailed bulleted list>"
+            f"<Bulleted list of CONCRETE evidence of failure — cite specific paths, exit codes, or content>"
         )
 
         messages = [
-            Message(role="system", content="You are a strict QA reviewer agent."),
+            Message(role="system", content="You are a quality control reviewer agent."),
             Message(role="user", content=review_prompt),
         ]
 

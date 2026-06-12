@@ -43,7 +43,7 @@ class RunCommandTool(BaseTool):
     def __init__(self, cwd: str | None = None) -> None:
         self._cwd = cwd  # None → inherited from the calling process
 
-    def execute(self, **kwargs: Any) -> ToolResult:  # noqa: ANN401
+    async def execute(self, **kwargs: Any) -> ToolResult:  # noqa: ANN401
         cmd: str = kwargs.get("cmd", "")
         timeout: int = int(kwargs.get("timeout", _DEFAULT_TIMEOUT))
 

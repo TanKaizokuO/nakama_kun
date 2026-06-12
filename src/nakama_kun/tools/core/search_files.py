@@ -55,7 +55,7 @@ class SearchFilesTool(BaseTool):
     def __init__(self, workspace_root: str | None = None) -> None:
         self._workspace_root = workspace_root or os.getcwd()
 
-    def execute(self, **kwargs: Any) -> ToolResult:  # noqa: ANN401
+    async def execute(self, **kwargs: Any) -> ToolResult:  # noqa: ANN401
         query: str = kwargs.get("query", "")
         path_str: str = kwargs.get("path", ".")
 

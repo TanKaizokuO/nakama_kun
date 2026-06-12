@@ -51,11 +51,11 @@ class SafetyManager:
             diff_text=diff_text,
         )
 
-    def apply_proposal(
+    async def apply_proposal(
         self, proposal: FileChangeProposal, provider: ApprovalProvider
     ) -> bool:
         """Submit the proposal to the provider. If approved, make changes and record rollback info."""
-        if not provider.request_approval(proposal):
+        if not await provider.request_approval(proposal):
             return False
 
         # Apply change

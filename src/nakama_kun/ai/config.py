@@ -1,15 +1,18 @@
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from nakama_kun.config import find_env_file
+
 
 class AISettings(BaseSettings):
     """Configuration system for nakama_kun's AI layer."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=find_env_file(),
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
 
     openrouter_api_key: SecretStr | None = Field(
         default=None, validation_alias="OPENROUTER_API_KEY"

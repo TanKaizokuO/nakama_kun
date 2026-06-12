@@ -14,7 +14,7 @@ class TerminalApprovalProvider(ApprovalProvider):
     def __init__(self, console: Console | None = None) -> None:
         self.console = console or Console()
 
-    def request_approval(self, proposal: FileChangeProposal) -> bool:
+    async def request_approval(self, proposal: FileChangeProposal) -> bool:
         """Draws a beautiful diff and prompts the user to approve the change."""
         self.console.print()
         
@@ -45,9 +45,9 @@ class TerminalApprovalProvider(ApprovalProvider):
 
         # Prompt for approval using questionary confirm
         try:
-            approved = questionary.confirm(
+            approved = await questionary.confirm(
                 "Do you approve applying this change?", default=False
-            ).ask()
+            ).ask_async()
         except (KeyboardInterrupt, EOFError):
             approved = False
 

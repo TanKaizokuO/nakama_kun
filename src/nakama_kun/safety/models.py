@@ -20,7 +20,7 @@ class ApprovalProvider(ABC):
     """Abstract interface to ask for approval of proposed workspace changes."""
 
     @abstractmethod
-    def request_approval(self, proposal: FileChangeProposal) -> bool:
+    async def request_approval(self, proposal: FileChangeProposal) -> bool:
         """Asks the user or external router to approve the proposal.
 
         Returns True if approved, False if rejected.
@@ -34,5 +34,5 @@ class AutoApprovalProvider(ApprovalProvider):
     def __init__(self, approve: bool = True) -> None:
         self.approve = approve
 
-    def request_approval(self, proposal: FileChangeProposal) -> bool:
+    async def request_approval(self, proposal: FileChangeProposal) -> bool:
         return self.approve

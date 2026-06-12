@@ -17,6 +17,8 @@ import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from nakama_kun.ai.models.message import Message, ToolCall
 from nakama_kun.ai.models.response import AIResponse, TokenUsage
 from nakama_kun.tools import ToolRegistry, build_default_registry
@@ -61,7 +63,7 @@ class _EchoTool(BaseTool):
         "required": ["msg"],
     }
 
-    def execute(self, **kwargs: Any) -> ToolResult:
+    async def execute(self, **kwargs: Any) -> ToolResult:
         return ToolResult(success=True, output=f"echo: {kwargs.get('msg', '')}")
 
 
@@ -253,16 +255,18 @@ class TestExecuteToolCall:
         registry.register(_EchoTool())
         return _build_agent_mode(chat_service, registry=registry)
 
-    def test_successful_dispatch(self) -> None:
+    @pytest.mark.anyio
+    async def test_successful_dispatch(self) -> None:
         agent = self._make_agent()
         tc = _make_tool_call("echo", {"msg": "nakama"})
-        content = agent._execute_tool_call(tc)
+        content = await agent._execute_tool_call(tc)
         assert "echo: nakama" in content
 
-    def test_unknown_tool_returns_error_string(self) -> None:
+    @pytest.mark.anyio
+    async def test_unknown_tool_returns_error_string(self) -> None:
         agent = self._make_agent()
         tc = _make_tool_call("ghost_tool", {})
-        content = agent._execute_tool_call(tc)
+        content = await agent._execute_tool_call(tc)
         assert "ERROR" in content
 
     def test_tool_result_content_success(self) -> None:
