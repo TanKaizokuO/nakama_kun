@@ -133,3 +133,50 @@ async def test_planner_node_retry_memory() -> None:
     assert "Referenced file does not exist: test_result.py" in called_prompt
     assert "Test runner command failed: 'pytest'" in called_prompt
     assert "Tests: 2 passed, 1 failed, 0 errors, 0 skipped" in called_prompt
+
+
+@pytest.mark.anyio
+async def test_planner_node_retry_memory_no_verification_report() -> None:
+    # 1. Mock PlannerService
+    mock_planner_service = MagicMock(spec=PlannerService)
+    mock_plan = Plan(
+        goal_summary="Summary of goal",
+        targets=["test.py"],
+        assumptions=[],
+        ordered_steps=["Step 1"],
+        risks=[],
+        validation_checklist=[],
+    )
+    mock_planner_service.plan = AsyncMock(return_value=(mock_plan, "Plan raw details"))
+
+    planner_node = make_planner_node(mock_planner_service)
+
+    state: AgentState = {
+        "goal": "Write a python file and run tests",
+        "plan": mock_plan,
+        "messages": [],
+        "tool_results": [
+            {
+                "tool": "write_file",
+                "arguments": {"path": "result.py", "content": "x = 42"},
+                "success": True,
+                "content": "Successfully wrote 6 characters.",
+            }
+        ],
+        "verification_report": None,  # No verification report
+        "reviewer_feedback": "[REJECTED] Test failed.",
+        "retry_count": 1,
+        "final_response": None,
+        "status": "planning",
+    }
+
+    result = await planner_node(state)
+    assert result["retry_count"] == 2
+
+    # Verify that prompt was enriched but didn't crash
+    called_prompt = mock_planner_service.plan.call_args[0][0]
+    assert "### Reviewer Feedback" in called_prompt
+    assert "### Failed Validations" in called_prompt
+    # Since report is None, failed validations should format as "(none)"
+    assert "### Failed Validations\n(none)" in called_prompt
+
