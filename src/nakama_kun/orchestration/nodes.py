@@ -435,15 +435,111 @@ def make_final_response_node(chat_service: ChatService) -> Callable[[AgentState]
         logger.info("[LangGraph] Final Response Node starting...")
         goal = state["goal"]
         plan = state["plan"]
-        tool_results = state["tool_results"]
+        tool_results = state.get("tool_results", [])
+        verification_report = state.get("verification_report")
+
+        # Extract structured metrics
+        files_created: list[str] = []
+        files_modified: list[str] = []
+        workspace_snapshot: list[str] = []
+        total_passed = 0
+        total_failed = 0
+        total_errors = 0
+        total_skipped = 0
+        has_tests = False
+
+        if verification_report:
+            files_created = [f.path for f in verification_report.files_created if f.exists]
+            files_modified = [f.path for f in verification_report.files_modified if f.exists]
+            workspace_snapshot = verification_report.workspace_snapshot
+
+            for cr in verification_report.command_results:
+                if cr.test_summary:
+                    has_tests = True
+                    total_passed += cr.test_summary.get("passed", 0)
+                    total_failed += cr.test_summary.get("failed", 0)
+                    total_errors += cr.test_summary.get("errors", 0)
+                    total_skipped += cr.test_summary.get("skipped", 0)
+        else:
+            # Fallback extraction from tool_results
+            seen_files = set()
+            for r in tool_results:
+                tool_name = r.get("tool", "")
+                success = r.get("success", False)
+                arguments = r.get("arguments", {})
+
+                # Check for write_file
+                if tool_name == "write_file" and success:
+                    from nakama_kun.orchestration.verification import _extract_paths_from_arguments
+
+                    paths = _extract_paths_from_arguments(arguments)
+                    for p in paths:
+                        if p not in seen_files:
+                            seen_files.add(p)
+                            files_created.append(p)
+
+                # Check for run_command test parsing fallback
+                elif tool_name == "run_command":
+                    cmd = arguments.get("cmd", "")
+                    content = r.get("content", "")
+                    json_content = content
+                    if content.startswith("ERROR: "):
+                        json_content = content[len("ERROR: "):]
+
+                    # Try to parse as JSON first
+                    stdout_val = json_content
+                    try:
+                        data = json.loads(json_content)
+                        if isinstance(data, dict) and "stdout" in data:
+                            stdout_val = data.get("stdout", "")
+                    except Exception:
+                        pass
+
+                    from nakama_kun.orchestration.test_parser import parse_test_results
+
+                    ts = parse_test_results(cmd, stdout_val)
+                    if ts:
+                        has_tests = True
+                        total_passed += ts.get("passed", 0)
+                        total_failed += ts.get("failed", 0)
+                        total_errors += ts.get("errors", 0)
+                        total_skipped += ts.get("skipped", 0)
+
+        # Build structured metrics block
+        metrics_lines = [
+            "### STRUCTURED METRICS (TRUST AND CITE ONLY THESE METRICS)",
+            f"- Total Tool Executions: {len(tool_results)} runs",
+            f"- Files Created ({len(files_created)}): {', '.join(files_created) if files_created else '(none)'}",
+            f"- Files Modified ({len(files_modified)}): {', '.join(files_modified) if files_modified else '(none)'}",
+        ]
+        if has_tests:
+            metrics_lines.append(
+                f"- Test Execution Summary:\n"
+                f"  - Passed: {total_passed}\n"
+                f"  - Failed: {total_failed}\n"
+                f"  - Errors: {total_errors}\n"
+                f"  - Skipped: {total_skipped}"
+            )
+        else:
+            metrics_lines.append("- Test Execution Summary: No test suites were run.")
+
+        if workspace_snapshot:
+            metrics_lines.append(f"- Workspace Snapshot ({len(workspace_snapshot)} files):")
+            for f in workspace_snapshot[:20]:
+                metrics_lines.append(f"  - {f}")
+            if len(workspace_snapshot) > 20:
+                metrics_lines.append(f"  - ... and {len(workspace_snapshot) - 20} more files")
+
+        metrics_block = "\n".join(metrics_lines)
 
         summary_prompt = (
             f"Synthesize a final report summarizing the agent's work.\n"
             f"User Goal: {goal}\n"
-            f"Plan Proposed: {plan.goal_summary if plan else 'None'}\n"
-            f"Tool Executions: {len(tool_results)} runs.\n\n"
-            f"Create a beautiful markdown summary reporting what actions were completed, "
-            f"what files were modified or created, and confirming task completion."
+            f"Plan Proposed: {plan.goal_summary if plan else 'None'}\n\n"
+            f"{metrics_block}\n\n"
+            f"Create a beautiful markdown summary reporting what actions were completed. "
+            f"You MUST only cite the files created/modified and test counts listed in the structured metrics block. "
+            f"Do NOT invent, infer, or hallucinate other files, outcomes, or test metrics. If the metadata shows no tests ran, report that clearly."
         )
 
         messages = [
