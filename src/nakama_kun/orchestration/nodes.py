@@ -432,13 +432,19 @@ def make_final_response_node(chat_service: ChatService) -> Callable[[AgentState]
     """
 
     async def final_response_node(state: AgentState) -> dict[str, Any]:
+        """
+        Final response node that compiles a grounded summary report of the run.
+        To avoid LLM hallucinations and memory dependencies, we inject structured
+        metrics directly from the verification report (or tool_results as fallback).
+        The LLM is strictly instructed to cite only these metrics.
+        """
         logger.info("[LangGraph] Final Response Node starting...")
         goal = state["goal"]
         plan = state["plan"]
         tool_results = state.get("tool_results", [])
         verification_report = state.get("verification_report")
 
-        # Extract structured metrics
+        # Extract structured metrics for grounding the LLM's final response
         files_created: list[str] = []
         files_modified: list[str] = []
         workspace_snapshot: list[str] = []
