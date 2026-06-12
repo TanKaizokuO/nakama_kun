@@ -17,6 +17,7 @@ without executing tools or writing files directly.
 
 Additionally, the **Agent Mode** incorporates a robust execution workflow:
 - **Verification Layer**: Validates tool results, verifying file artifacts on disk and parsing test runner outputs (`pytest`/`unittest`).
+- **Evidence Store**: Preserves all tool execution outputs, file read/write states, and test execution details, ensuring that historical execution data is not lost even if files are deleted.
 - **Retry Memory**: Feeds previous tool failures, completed actions, and failed validations back to the planner during retries, ensuring the agent adapts instead of repeating previous actions.
 
 ---
