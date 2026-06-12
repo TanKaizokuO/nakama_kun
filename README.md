@@ -15,6 +15,10 @@ want a beautiful, keyboard-driven terminal experience. Phase 5 adds a dedicated
 **Plan Mode** REPL that produces clean, structured plans for implementation goals
 without executing tools or writing files directly.
 
+Additionally, the **Agent Mode** incorporates a robust execution workflow:
+- **Verification Layer**: Validates tool results, verifying file artifacts on disk and parsing test runner outputs (`pytest`/`unittest`).
+- **Retry Memory**: Feeds previous tool failures, completed actions, and failed validations back to the planner during retries, ensuring the agent adapts instead of repeating previous actions.
+
 ---
 
 ## Tech Stack
