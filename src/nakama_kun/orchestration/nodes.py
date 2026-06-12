@@ -32,12 +32,82 @@ def make_planner_node(planner_service: PlannerService) -> Callable[[AgentState],
         # If there is feedback, ask the planner to refine the plan
         if feedback:
             logger.info(f"[LangGraph] Refining plan based on feedback (retry {retry_count})...")
-            prompt = (
-                f"Original Goal: {goal}\n\n"
-                f"We previously attempted this, but a reviewer rejected it with this feedback:\n"
-                f"{feedback}\n\n"
-                f"Please update and refine the implementation plan to address this feedback."
-            )
+
+            # Extract completed actions (successful tool runs)
+            completed_actions = []
+            for r in state.get("tool_results", []):
+                if r.get("success", False):
+                    tool_name = r.get("tool", "")
+                    arguments = r.get("arguments", {})
+                    completed_actions.append(f"- Tool '{tool_name}' succeeded with args: {json.dumps(arguments)}")
+
+            # Extract previous failures (failed tool runs)
+            previous_failures = []
+            for r in state.get("tool_results", []):
+                if not r.get("success", False):
+                    tool_name = r.get("tool", "")
+                    arguments = r.get("arguments", {})
+                    content = r.get("content", "")
+                    content_snippet = content[:200] + "..." if len(content) > 200 else content
+                    previous_failures.append(
+                        f"- Tool '{tool_name}' failed with args: {json.dumps(arguments)}\n"
+                        f"  Output/Error: {content_snippet}"
+                    )
+
+            # Extract failed validations from verification report
+            failed_validations = []
+            report = state.get("verification_report")
+            if report:
+                # Check created/modified files
+                all_artifacts = report.files_created + report.files_modified
+                for fa in all_artifacts:
+                    if not fa.exists:
+                        failed_validations.append(f"- Expected file artifact does not exist: {fa.path}")
+
+                # Check general existence checks
+                artifact_paths = {fa.path for fa in all_artifacts}
+                for ec in report.existence_checks:
+                    if not ec.exists and ec.path not in artifact_paths:
+                        failed_validations.append(f"- Referenced file does not exist: {ec.path}")
+
+                # Check command results
+                for cr in report.command_results:
+                    if not cr.success:
+                        if cr.test_summary:
+                            failed_validations.append(
+                                f"- Test runner command failed: '{cr.cmd}' (Exit code: {cr.exit_code})\n"
+                                f"  Tests: {cr.test_summary.get('passed', 0)} passed, {cr.test_summary.get('failed', 0)} failed, "
+                                f"{cr.test_summary.get('errors', 0)} errors, {cr.test_summary.get('skipped', 0)} skipped"
+                            )
+                        else:
+                            stdout = cr.stdout_snippet or ""
+                            stdout_snippet = stdout[:200] + "..." if len(stdout) > 200 else stdout
+                            failed_validations.append(
+                                f"- Command failed: '{cr.cmd}' (Exit code: {cr.exit_code})\n"
+                                f"  Output:\n{stdout_snippet}"
+                            )
+
+            prompt_lines = [
+                f"Original Goal: {goal}",
+                "",
+                "We previously attempted this, but the task was not fully successful and requires a revised plan.",
+                "",
+                "### Reviewer Feedback",
+                feedback,
+                "",
+                "### Completed Actions",
+                "\n".join(completed_actions) if completed_actions else "(none)",
+                "",
+                "### Previous Failures",
+                "\n".join(previous_failures) if previous_failures else "(none)",
+                "",
+                "### Failed Validations",
+                "\n".join(failed_validations) if failed_validations else "(none)",
+                "",
+                "Please update and refine the implementation plan to address the feedback and failures, ensuring that the revised plan avoids the same failures and targets resolving the remaining issues."
+            ]
+            prompt = "\n".join(prompt_lines)
+
             # Increment retry count
             retry_count += 1
         else:
