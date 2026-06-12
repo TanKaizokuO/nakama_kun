@@ -33,6 +33,19 @@ We identified several critical gaps where evidence is lost or discarded:
 
 To resolve these issues, we introduce the **Evidence Store** (`EvidenceStore`), which acts as a structured repository preserving all execution evidence.
 
+```mermaid
+graph TD
+    A[Tool Calls in execution loop] -->|Append to| B(state.tool_results)
+    B -->|Passed to| C[Verifier Node]
+    C -->|Compiles| D[VerificationReport - final disk state]
+    C -->|Aggregates into| E[EvidenceStore - preserved history]
+    E -->|1. Preserve Tool Outputs| F(tool_outputs)
+    E -->|2. Preserve File Contents| G(file_validations: disk + read-time)
+    E -->|3. Preserve Command Outputs| H(command_outputs)
+    E -->|4. Preserve Test Summaries| I(test_outputs)
+    F & G & H & I -->|Passed in prompt to| J[Reviewer Node]
+```
+
 ### Requirements & Design
 1. **Preserve Tool Outputs**: Every tool call in `tool_results` is preserved with its full raw output in `ToolOutputEvidence`.
 2. **Preserve File Validations**: Captures read-time contents, write-time contents, and final physical disk checks in `FileValidationEvidence`. This ensures that even if a file is missing on disk at the end of the run, the fact that it was successfully read or written with specific content is preserved.
@@ -40,3 +53,19 @@ To resolve these issues, we introduce the **Evidence Store** (`EvidenceStore`), 
 4. **Preserve Test Outputs**: Preserves parsed test counts (passed, failed, skipped, errors) in `TestOutputEvidence`.
 
 The reviewer receives this complete historical log, allowing it to approve tasks even if intermediate files were cleaned up or final physical checks show them as missing.
+
+---
+
+## Part 3: System Verification & Test Results
+
+The new Evidence Store implementation has been validated using unit and integration tests.
+- **Test Suite**: [test_evidence_store.py](file:///home/tankaizokuo/Code/TanClaw/tests/test_evidence_store.py)
+  - `test_evidence_store_basic_build`: Confirms that `build_evidence_store` successfully extracts tool outputs, file validation checks (both physical and read-time), command outputs, and test results.
+  - `test_verifier_node_populates_evidence_store`: Checks that the verifier node correctly adds `evidence_store` to the returned state dictionary.
+  - `test_reviewer_node_receives_evidence_store`: Verifies that the reviewer's prompt is enriched with historical evidence from the store, and instructions are provided to avoid rejections for temporary files.
+
+All 163 unit and integration tests pass successfully in the workspace:
+```bash
+$ uv run pytest
+============================= 163 passed in 1.15s ==============================
+```
