@@ -271,6 +271,7 @@ def make_reviewer_node(chat_service: ChatService) -> Callable[[AgentState], Any]
         goal = state["goal"]
         plan = state["plan"]
         verification_report = state.get("verification_report")
+        evidence_store = state.get("evidence_store")
 
         plan_str = plan.goal_summary if plan else "None"
 
@@ -306,6 +307,42 @@ def make_reviewer_node(chat_service: ChatService) -> Callable[[AgentState], Any]
                 "=== END OUTCOME SIGNAL ==="
             )
 
+        evidence_store_block = ""
+        if evidence_store:
+            lines = [
+                "=== EVIDENCE STORE (PRESERVED HISTORICAL EVIDENCE) ===",
+            ]
+            lines.append(f"🛠️ PRESERVED TOOL OUTPUTS ({len(evidence_store.tool_outputs)}):")
+            for to in evidence_store.tool_outputs:
+                lines.append(f"  - Tool: {to.tool} (Success: {to.success})")
+                lines.append(f"    Args: {json.dumps(to.arguments)}")
+                snippet = to.output[:1000] + "..." if len(to.output) > 1000 else to.output
+                lines.append(f"    Output:\n{snippet}")
+
+            lines.append(f"\n📄 PRESERVED FILE VALIDATIONS ({len(evidence_store.file_validations)}):")
+            for fv in evidence_store.file_validations:
+                status = "EXISTS" if fv.exists else "MISSING"
+                lines.append(f"  - Path: {fv.path} ({status}, Source: {fv.source})")
+                if fv.content:
+                    snippet = fv.content[:1000] + "..." if len(fv.content) > 1000 else fv.content
+                    lines.append(f"    Content:\n{snippet}")
+
+            lines.append(f"\n💻 PRESERVED COMMAND OUTPUTS ({len(evidence_store.command_outputs)}):")
+            for co in evidence_store.command_outputs:
+                status = "PASS" if co.success else "FAIL"
+                lines.append(f"  - Command: {co.cmd} ({status}, Exit code: {co.exit_code})")
+                snippet = co.output[:1000] + "..." if len(co.output) > 1000 else co.output
+                lines.append(f"    Output:\n{snippet}")
+
+            lines.append(f"\n🧪 PRESERVED TEST RESULTS ({len(evidence_store.test_outputs)}):")
+            for tst in evidence_store.test_outputs:
+                status = "PASS" if tst.success else "FAIL"
+                lines.append(f"  - Command: {tst.cmd} ({status})")
+                lines.append(f"    Tests: {tst.passed} passed, {tst.failed} failed, {tst.errors} errors, {tst.skipped} skipped")
+
+            lines.append("=== END EVIDENCE STORE ===")
+            evidence_store_block = "\n".join(lines)
+
         review_prompt = (
             f"You are a quality control reviewer evaluating whether a task has been completed.\n\n"
             f"Original Goal: {goal}\n"
@@ -314,7 +351,10 @@ def make_reviewer_node(chat_service: ChatService) -> Callable[[AgentState], Any]
             f"  1. PRIMARY — Artifact Existence (HIGHEST PRIORITY)\n"
             f"     If the requested files/artifacts exist on disk with appropriate content,\n"
             f"     the goal has been achieved. This is sufficient to APPROVE.\n"
-            f"     Intermediate tool failures are IRRELEVANT if a fallback produced the artifact.\n\n"
+            f"     Intermediate tool failures are IRRELEVANT if a fallback produced the artifact.\n"
+            f"     If a file is physically missing from the final disk state but is recorded in the\n"
+            f"     Evidence Store as successfully read or verified during execution (source: tool_read or tool_write),\n"
+            f"     and it was not a required final output artifact, do NOT reject the task based on that file being missing.\n\n"
             f"  2. SECONDARY — Test / Command Results\n"
             f"     If tests ran and passed (Exit Code 0), this CONFIRMS the artifacts are correct.\n"
             f"     If tests ran and FAILED (non-zero exit code), this OVERRIDES artifact existence → REJECT.\n\n"
@@ -329,12 +369,20 @@ def make_reviewer_node(chat_service: ChatService) -> Callable[[AgentState], Any]
             f"{signal_header}\n\n"
             f"--- FULL EVIDENCE ---\n"
             f"{evidence_block}\n\n"
+        )
+        if evidence_store_block:
+            review_prompt += (
+                f"--- EVIDENCE STORE (HISTORICAL EXECUTION EVIDENCE) ---\n"
+                f"{evidence_store_block}\n\n"
+            )
+        review_prompt += (
             f"--- DECISION RULES ---\n"
             f"APPROVE if:\n"
             f"  - Outcome signal is APPROVE, OR\n"
-            f"  - Requested artifacts exist on disk AND no tests failed.\n\n"
+            f"  - Requested artifacts exist on disk AND no tests failed,\n"
+            f"  - OR a file is physically missing but the Evidence Store validates it was successfully read/written during tool run.\n\n"
             f"REJECT only if you have concrete evidence of failure:\n"
-            f"  - Required files are explicitly confirmed MISSING from disk, OR\n"
+            f"  - Required files are explicitly confirmed MISSING from disk and have no successful read/write record in the Evidence Store, OR\n"
             f"  - A test/validation command exited with a non-zero code, OR\n"
             f"  - File content is clearly wrong or empty for the stated goal.\n\n"
             f"Do NOT reject because:\n"
