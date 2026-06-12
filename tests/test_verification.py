@@ -817,3 +817,124 @@ async def test_reviewer_prompt_hierarchy_ordering(
     assert signal_pos < primary_pos or signal_pos > tertiary_pos, (
         "Outcome signal must appear near the top of the prompt"
     )
+
+
+def test_verification_layer_pytest_parsing(tmp_path: Any) -> None:
+    """Verify VerificationLayer parses pytest results in run_command outputs."""
+    layer = VerificationLayer(str(tmp_path))
+    
+    pytest_stdout = """
+============================= test session starts ==============================
+test_calculator.py ..F..                                                  [100%]
+=================== 4 passed, 1 failed in 0.15s ===================
+"""
+    
+    state: AgentState = {
+        "goal": "Run tests",
+        "plan": None,
+        "messages": [],
+        "tool_results": [
+            {
+                "tool": "run_command",
+                "arguments": {"cmd": "pytest tests/"},
+                "success": True,  # suppose command itself returned success but tests failed
+                "content": pytest_stdout,
+            }
+        ],
+        "verification_report": None,
+        "reviewer_feedback": None,
+        "retry_count": 0,
+        "final_response": None,
+        "status": "executing",
+    }
+    
+    report = layer.run(state)
+    assert len(report.command_results) == 1
+    cr = report.command_results[0]
+    
+    assert cr.test_summary is not None
+    assert cr.test_summary["passed"] == 4
+    assert cr.test_summary["failed"] == 1
+    assert cr.test_summary["errors"] == 0
+    assert cr.test_summary["success"] is False
+    # Verify overall success is updated to False because tests failed
+    assert cr.success is False
+
+
+def test_verification_layer_unittest_parsing(tmp_path: Any) -> None:
+    """Verify VerificationLayer parses unittest results in run_command outputs."""
+    layer = VerificationLayer(str(tmp_path))
+    
+    unittest_stdout = """
+Ran 8 tests in 0.005s
+
+OK (skipped=2)
+"""
+    
+    state: AgentState = {
+        "goal": "Run tests",
+        "plan": None,
+        "messages": [],
+        "tool_results": [
+            {
+                "tool": "run_command",
+                "arguments": {"cmd": "python -m unittest"},
+                "success": True,
+                "content": unittest_stdout,
+            }
+        ],
+        "verification_report": None,
+        "reviewer_feedback": None,
+        "retry_count": 0,
+        "final_response": None,
+        "status": "executing",
+    }
+    
+    report = layer.run(state)
+    assert len(report.command_results) == 1
+    cr = report.command_results[0]
+    
+    assert cr.test_summary is not None
+    assert cr.test_summary["passed"] == 6
+    assert cr.test_summary["failed"] == 0
+    assert cr.test_summary["skipped"] == 2
+    assert cr.test_summary["success"] is True
+    assert cr.success is True
+
+
+def test_verification_layer_failed_test_triggers_rejection(tmp_path: Any) -> None:
+    """Verify failed tests in command results lead to a REJECT recommendation."""
+    layer = VerificationLayer(str(tmp_path))
+    
+    pytest_stdout = """
+============================= test session starts ==============================
+=================== 3 passed, 1 error in 0.05s ===================
+"""
+    
+    state: AgentState = {
+        "goal": "Run tests",
+        "plan": None,
+        "messages": [],
+        "tool_results": [
+            {
+                "tool": "run_command",
+                "arguments": {"cmd": "pytest"},
+                "success": True,
+                "content": pytest_stdout,
+            }
+        ],
+        "verification_report": None,
+        "reviewer_feedback": None,
+        "retry_count": 0,
+        "final_response": None,
+        "status": "executing",
+    }
+    
+    report = layer.run(state)
+    signal = report.evaluate_outcome()
+    
+    assert signal.recommendation == "REJECT"
+    assert "tests failed" in signal.reason
+    assert "3 passed" in signal.reason
+    assert "1 errors" in signal.reason
+
