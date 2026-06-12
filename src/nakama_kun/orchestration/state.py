@@ -5,6 +5,7 @@ from typing import Annotated, Any, TypedDict
 
 from nakama_kun.ai.models.message import Message
 from nakama_kun.ai.models.plan import Plan
+from nakama_kun.orchestration.evidence import EvidenceStore
 from nakama_kun.orchestration.verification import VerificationReport
 
 
@@ -27,6 +28,9 @@ class AgentState(TypedDict):
     # Contains real file contents, command exit codes, and workspace listings —
     # the Reviewer evaluates this instead of raw tool summaries.
     verification_report: VerificationReport | None
+
+    # Structured evidence store containing preserved tool outputs, validations, etc.
+    evidence_store: EvidenceStore | None
 
     # Feedback from the Reviewer node if work needs adjustment
     reviewer_feedback: str | None
