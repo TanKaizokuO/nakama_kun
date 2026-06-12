@@ -51,6 +51,7 @@ class RunCommandTool(BaseTool):
             return ToolResult(success=False, error="'cmd' argument is required.")
 
         try:
+            # Capture stdout and stderr separately, executing through shell to support command chaining
             result = subprocess.run(
                 cmd,
                 shell=True,  # noqa: S602
