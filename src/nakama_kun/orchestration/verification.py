@@ -223,24 +223,45 @@ class VerificationReport:
         any_test_failed = commands_failed > 0
         tests_passed = not any_test_failed  # vacuously True when no commands ran
 
+        # Aggregate test counts if any commands had structured test results
+        total_passed_tests = 0
+        total_failed_tests = 0
+        total_error_tests = 0
+        total_skipped_tests = 0
+        has_tests = False
+
+        for cr in self.command_results:
+            if cr.test_summary is not None:
+                has_tests = True
+                total_passed_tests += cr.test_summary["passed"]
+                total_failed_tests += cr.test_summary["failed"]
+                total_error_tests += cr.test_summary["errors"]
+                total_skipped_tests += cr.test_summary["skipped"]
+
         # --- apply hierarchy ---
         if artifacts_exist and not any_test_failed:
             rec = "APPROVE"
+            if has_tests:
+                test_details = f"; Tests: {total_passed_tests} passed, {total_failed_tests} failed, {total_error_tests} errors, {total_skipped_tests} skipped"
+            else:
+                test_details = f"; {commands_passed} command(s) passed" if commands_passed > 0 else ""
             reason = (
                 f"{files_created_count} artifact(s) confirmed on disk"
-                + (
-                    f"; {commands_passed} command(s) passed"
-                    if commands_passed > 0
-                    else ""
-                )
+                + test_details
                 + ". Intermediate tool failures (if any) were superseded by fallbacks."
             )
         elif artifacts_exist and any_test_failed:
             rec = "REJECT"
-            reason = (
-                f"Artifact(s) exist ({files_created_count} on disk) but "
-                f"{commands_failed} test/command(s) failed with non-zero exit code."
-            )
+            if has_tests:
+                reason = (
+                    f"Artifact(s) exist ({files_created_count} on disk) but "
+                    f"tests failed: {total_passed_tests} passed, {total_failed_tests} failed, {total_error_tests} errors."
+                )
+            else:
+                reason = (
+                    f"Artifact(s) exist ({files_created_count} on disk) but "
+                    f"{commands_failed} test/command(s) failed with non-zero exit code."
+                )
         elif not artifacts_exist and any_file_missing:
             rec = "REJECT"
             reason = (
@@ -249,9 +270,14 @@ class VerificationReport:
             )
         elif not artifacts_exist and any_test_failed:
             rec = "REJECT"
-            reason = (
-                f"No artifacts on disk and {commands_failed} command(s) failed."
-            )
+            if has_tests:
+                reason = (
+                    f"No artifacts on disk and tests failed: {total_passed_tests} passed, {total_failed_tests} failed, {total_error_tests} errors."
+                )
+            else:
+                reason = (
+                    f"No artifacts on disk and {commands_failed} command(s) failed."
+                )
         elif not artifacts_exist and len(self.existence_checks) == 0 and len(self.command_results) == 0:
             rec = "UNCERTAIN"
             reason = "No tools produced verifiable evidence. Cannot confirm goal completion."
@@ -344,6 +370,12 @@ class VerificationReport:
                 status = "✅ PASS" if cr.success else "❌ FAIL"
                 lines.append(f"  [{status}] $ {cr.cmd}")
                 lines.append(f"  Exit Code: {cr.exit_code}")
+                if cr.test_summary:
+                    ts = cr.test_summary
+                    lines.append(
+                        f"  Tests    : {ts['passed']} passed, {ts['failed']} failed, "
+                        f"{ts['errors']} errors, {ts['skipped']} skipped (success: {ts['success']})"
+                    )
                 snippet = cr.stdout_snippet[:max_content_chars]
                 lines.append(f"  Output:\n---\n{snippet}\n---")
         else:
