@@ -306,3 +306,37 @@ async def test_verifier_node_in_orchestration(tmp_path: Any) -> None:
     assert len(report.files_created) == 1
     assert report.files_created[0].exists is True
     assert "x = 42" in report.files_created[0].content_snippet
+
+
+@pytest.mark.anyio
+async def test_planner_node_retry_state_verification(mock_planner_service: MagicMock) -> None:
+    """Verify that planner node increments retry count and updates state correctly with feedback."""
+    mock_plan = Plan(
+        goal_summary="Summary of goal",
+        targets=["test.py"],
+        assumptions=[],
+        ordered_steps=["Step 1"],
+        risks=[],
+        validation_checklist=[],
+    )
+    mock_planner_service.plan.return_value = (mock_plan, "Plan raw details")
+
+    planner_node = make_planner_node(mock_planner_service)
+
+    state: AgentState = {
+        "goal": "Write python file",
+        "plan": mock_plan,
+        "messages": [],
+        "tool_results": [],
+        "verification_report": None,
+        "reviewer_feedback": "Please fix issues.",
+        "retry_count": 2,
+        "final_response": None,
+        "status": "planning",
+    }
+
+    result = await planner_node(state)
+    assert result["retry_count"] == 3
+    assert result["status"] == "executing"
+    assert result["plan"] == mock_plan
+
