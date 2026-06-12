@@ -71,4 +71,17 @@ To address this, we designed a robust fallback parser that operates directly on 
 
 This ensures that even without a `VerificationReport` object in `AgentState`, the final report prompt remains 100% grounded in reality.
 
+---
+
+## Part 5: Old vs. New Behavior Comparison
+
+| Feature / Metric | Old Behavior | New Behavior |
+| :--- | :--- | :--- |
+| **Data Sources** | User Goal, Plan Goal, and Tool Executions Count (`len(tool_results)`). | Goal, Plan, VerificationReport (Files created/modified, Test counts, Workspace Snapshot). |
+| **File Outcomes** | Hallucinated based on proposed plan (often claiming success for files that were never written). | Explicitly extracted from files verified on disk (missing files excluded). |
+| **Test Verification** | Invented / guessed by LLM (often citing arbitrary success numbers). | Exact parsed counts of passed, failed, errors, skipped tests from pytests/unittests. |
+| **Workspace Context** | Completely missing. | Top 20 files snapshot physically present in workspace. |
+| **Inference/Guesses** | Allowed and implicitly expected (due to lack of grounded input). | Strictly forbidden by prompt guidelines. |
+
+
 
