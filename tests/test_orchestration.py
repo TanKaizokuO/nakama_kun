@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -13,6 +14,7 @@ from nakama_kun.orchestration.nodes import (
     make_final_response_node,
     make_planner_node,
     make_reviewer_node,
+    make_verifier_node,
 )
 from nakama_kun.orchestration.state import AgentState
 from nakama_kun.orchestration.workflow import build_agent_graph, route_after_review
@@ -57,6 +59,7 @@ async def test_planner_node(mock_planner_service: MagicMock) -> None:
         "plan": None,
         "messages": [],
         "tool_results": [],
+        "verification_report": None,
         "reviewer_feedback": None,
         "retry_count": 0,
         "final_response": None,
@@ -75,6 +78,7 @@ async def test_planner_node(mock_planner_service: MagicMock) -> None:
         "plan": None,
         "messages": [],
         "tool_results": [],
+        "verification_report": None,
         "reviewer_feedback": "Syntax error in file.",
         "retry_count": 1,
         "final_response": None,
@@ -124,6 +128,7 @@ async def test_executor_node(mock_chat_service: MagicMock) -> None:
         "plan": None,
         "messages": [],
         "tool_results": [],
+        "verification_report": None,
         "reviewer_feedback": None,
         "retry_count": 0,
         "final_response": None,
@@ -148,6 +153,7 @@ async def test_reviewer_node(mock_chat_service: MagicMock) -> None:
         "plan": None,
         "messages": [],
         "tool_results": [],
+        "verification_report": None,
         "reviewer_feedback": None,
         "retry_count": 0,
         "final_response": None,
@@ -181,6 +187,7 @@ def test_routing_logic() -> None:
         "plan": None,
         "messages": [],
         "tool_results": [],
+        "verification_report": None,
         "reviewer_feedback": None,
         "retry_count": 0,
         "final_response": None,
@@ -194,6 +201,7 @@ def test_routing_logic() -> None:
         "plan": None,
         "messages": [],
         "tool_results": [],
+        "verification_report": None,
         "reviewer_feedback": "Errors present.",
         "retry_count": 1,
         "final_response": None,
@@ -207,6 +215,7 @@ def test_routing_logic() -> None:
         "plan": None,
         "messages": [],
         "tool_results": [],
+        "verification_report": None,
         "reviewer_feedback": "Errors present.",
         "retry_count": 3,
         "final_response": None,
@@ -229,6 +238,7 @@ async def test_final_response_node(mock_chat_service: MagicMock) -> None:
         "plan": None,
         "messages": [],
         "tool_results": [],
+        "verification_report": None,
         "reviewer_feedback": None,
         "retry_count": 0,
         "final_response": None,
@@ -241,15 +251,58 @@ async def test_final_response_node(mock_chat_service: MagicMock) -> None:
 
 
 def test_build_agent_graph(mock_chat_service: MagicMock, mock_planner_service: MagicMock) -> None:
-    """Verify the stategraph workflow compiles successfully."""
+    """Verify the stategraph workflow compiles successfully with verifier node."""
     registry = MagicMock(spec=ToolRegistry)
     router = MagicMock(spec=ToolRouter)
-    
+
     graph = build_agent_graph(
         chat_service=mock_chat_service,
         planner_service=mock_planner_service,
         tool_registry=registry,
         tool_router=router,
+        workspace_root="/tmp/test_workspace",
     )
     compiled = graph.compile()
     assert compiled is not None
+
+
+@pytest.mark.anyio
+async def test_verifier_node_in_orchestration(tmp_path: Any) -> None:
+    """Verify make_verifier_node returns a working async node that stores a report."""
+    import pathlib
+
+    from nakama_kun.orchestration.verification import VerificationReport
+
+    workspace = str(tmp_path)
+    target_file = str(tmp_path / "result.py")
+    pathlib.Path(target_file).write_text("x = 42", encoding="utf-8")
+
+    verifier_node = make_verifier_node(workspace_root=workspace)
+
+    state: AgentState = {
+        "goal": "Write result.py",
+        "plan": None,
+        "messages": [],
+        "tool_results": [
+            {
+                "tool": "write_file",
+                "arguments": {"path": target_file, "content": "x = 42"},
+                "success": True,
+                "content": f"Successfully wrote 6 characters to '{target_file}'.",
+            }
+        ],
+        "verification_report": None,
+        "reviewer_feedback": None,
+        "retry_count": 0,
+        "final_response": None,
+        "status": "reviewing",
+    }
+
+    result = await verifier_node(state)
+    report = result["verification_report"]
+    assert isinstance(report, VerificationReport)
+    assert result["status"] == "reviewing"
+    # The file exists on disk — verifier should detect it
+    assert len(report.files_created) == 1
+    assert report.files_created[0].exists is True
+    assert "x = 42" in report.files_created[0].content_snippet

@@ -146,3 +146,23 @@ dependencies = ["typer"]
     assert "test-project" in summary or tmp_path.name in summary
     assert "Python" in summary
     assert "src/lib.py" in summary or "src/" in summary
+
+
+def test_find_env_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import pytest
+    from nakama_kun.config import find_env_file
+
+    # Create dummy .env in temp path
+    env_file = tmp_path / ".env"
+    env_file.write_text("TEST_VAR=1")
+
+    # Create a sub-folder to simulate running from tests/
+    sub_dir = tmp_path / "tests" / "sub"
+    sub_dir.mkdir(parents=True)
+
+    # Monkeypatch CWD to the sub-folder
+    monkeypatch.chdir(sub_dir)
+
+    resolved = find_env_file()
+    assert Path(resolved).resolve() == env_file.resolve()
+
