@@ -54,3 +54,21 @@ We ran the grounding tests and the entire suite to verify correct execution:
 - Grounding tests: `uv run pytest tests/test_reporting_grounding.py -v` (3/3 passed).
 - Complete test suite: `uv run pytest` (171/171 passed).
 
+---
+
+## Part 4: Fallback Metrics Extraction Design
+
+In cases where the agent loop terminates early or fails to produce a formal `VerificationReport` (for instance, if the planner fails or crashes before verification runs), the final response node must still provide a grounded summary.
+
+To address this, we designed a robust fallback parser that operates directly on `state["tool_results"]`:
+1. **File Write Extraction**:
+   - We scan for all successful executions of the `write_file` tool.
+   - We parse the target file paths using `_extract_paths_from_arguments` to determine which files the agent attempted to modify/create.
+2. **Command Test Summaries**:
+   - We scan for all `run_command` executions.
+   - For each execution, we extract the exit code, standard output, and standard error.
+   - We run these output buffers through our unit/integration test output parser (`parse_test_results`) to determine if test frameworks (like pytest or unittest) were executed, extracting their respective passed, failed, error, and skipped counts.
+
+This ensures that even without a `VerificationReport` object in `AgentState`, the final report prompt remains 100% grounded in reality.
+
+
