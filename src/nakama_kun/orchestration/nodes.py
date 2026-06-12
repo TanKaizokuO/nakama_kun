@@ -12,6 +12,7 @@ from nakama_kun.ai.prompts.system_prompt import (
 )
 from nakama_kun.ai.services.chat_service import ChatService
 from nakama_kun.ai.services.planner_service import PlannerService
+from nakama_kun.orchestration.evidence import build_evidence_store
 from nakama_kun.orchestration.state import AgentState
 from nakama_kun.orchestration.verification import VerificationLayer
 from nakama_kun.tools import ToolRegistry, ToolRouter
@@ -249,8 +250,10 @@ def make_verifier_node(workspace_root: str | None = None) -> Callable[[AgentStat
         logger.info("[LangGraph] Verifier Node starting...")
         report = layer.run(state)
         logger.info(f"[LangGraph] Verifier complete: {report.summary}")
+        evidence_store = build_evidence_store(state, report, workspace_root)
         return {
             "verification_report": report,
+            "evidence_store": evidence_store,
             "status": "reviewing",
         }
 
