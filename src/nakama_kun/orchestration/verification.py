@@ -77,13 +77,21 @@ class ExistenceCheck:
 class CommandResult:
     """Captures the full output of a run_command tool invocation."""
 
-    __slots__ = ("cmd", "exit_code", "stdout_snippet", "success")
+    __slots__ = ("cmd", "exit_code", "stdout_snippet", "success", "test_summary")
 
-    def __init__(self, cmd: str, exit_code: int, stdout_snippet: str, success: bool) -> None:
+    def __init__(
+        self,
+        cmd: str,
+        exit_code: int,
+        stdout_snippet: str,
+        success: bool,
+        test_summary: dict[str, Any] | None = None,
+    ) -> None:
         self.cmd = cmd
         self.exit_code = exit_code
         self.stdout_snippet = stdout_snippet
         self.success = success
+        self.test_summary = test_summary
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -91,6 +99,7 @@ class CommandResult:
             "exit_code": self.exit_code,
             "stdout_snippet": self.stdout_snippet,
             "success": self.success,
+            "test_summary": self.test_summary,
         }
 
 
