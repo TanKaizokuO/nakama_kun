@@ -253,6 +253,7 @@ class AgentMode(BaseMode):
             "retry_count": 0,
             "final_response": None,
             "status": "planning",
+            "goal_satisfied": False,
         }
 
         # Keep history in-sync

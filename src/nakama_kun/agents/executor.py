@@ -8,6 +8,7 @@ from nakama_kun.agents.base import BaseAgent
 from nakama_kun.agents.prompts import EXECUTOR_AGENT_PROMPT
 from nakama_kun.ai.models.message import Message
 from nakama_kun.ai.services.chat_service import ChatService
+from nakama_kun.orchestration.goal_satisfaction import check_goal_satisfaction
 from nakama_kun.orchestration.nodes import (
     DELIVERY_TOOLS,
     EXPLORATION_TOOLS,
@@ -43,6 +44,22 @@ class ExecutorAgent(BaseAgent):
         goal = state["goal"]
         plan = state.get("plan")
         plan_desc = plan.goal_summary if plan else "Execute target goal."
+        
+        goal_satisfied = state.get("goal_satisfied", False)
+        task_type = state.get("task_type") or "MODIFICATION"
+
+        if goal_satisfied:
+            logger.info("[ExecutorAgent] Goal is already satisfied. Skipping execution.")
+            return {
+                "messages": [],
+                "tool_results": [],
+                "created_artifacts": list(state.get("created_artifacts", [])),
+                "research_budget_remaining": state.get("research_budget_remaining", 15),
+                "delivery_mode": state.get("delivery_mode", False),
+                "agent_history": list(state.get("agent_history", [])),
+                "status": "reviewing",
+                "goal_satisfied": True,
+            }
 
         # 1. Setup system prompt including coder proposals
         system_prompt = (
@@ -91,8 +108,12 @@ class ExecutorAgent(BaseAgent):
             (state.get("retry_memory") or {}).get("failed_attempt_signatures", [])
         )
 
+        early_stop_telemetry = state.get("early_stop_telemetry")
+
         round_idx = 1
         for round_idx in range(1, max_rounds + 1):
+            if goal_satisfied:
+                break
             logger.info(f"[ExecutorAgent] Executor Round {round_idx}/{max_rounds}...")
 
             missing_artifacts = _missing_required_artifacts(required_artifacts, created_artifacts)
@@ -182,7 +203,7 @@ class ExecutorAgent(BaseAgent):
                     )
                 else:
                     try:
-                        result = await self.tool_router.dispatch(name, arguments)
+                        result = await self.tool_router.dispatch(name, arguments, task_type=task_type)
                         success = result.success
                         content = result.to_content()
                     except Exception as exc:
@@ -221,6 +242,29 @@ class ExecutorAgent(BaseAgent):
                     }
                 )
 
+                if success and not goal_satisfied:
+                    gsr = check_goal_satisfaction(
+                        task=goal,
+                        task_type=task_type,
+                        tool_outputs=new_tool_results,
+                        evidence_store=state.get("evidence_store"),
+                        execution_history=state.get("agent_history", []),
+                    )
+                    if gsr.goal_satisfied:
+                        goal_satisfied = True
+                        early_stop_telemetry = {
+                            "stop_reason": gsr.explanation,
+                            "stop_round": round_idx,
+                            "evidence_used": new_tool_results[-1] if new_tool_results else None,
+                        }
+                        logger.info(
+                            f"[ExecutorAgent] GoalSatisfactionDetector: {gsr.explanation} "
+                            f"(confidence={gsr.confidence:.2f})"
+                        )
+
+                if goal_satisfied:
+                    break
+
                 if name in EXPLORATION_TOOLS:
                     research_actions_used += 1
                     research_budget_remaining = max(RESEARCH_THRESHOLD - research_actions_used, 0)
@@ -244,6 +288,10 @@ class ExecutorAgent(BaseAgent):
                             if written_path not in created_artifacts:
                                 created_artifacts.append(written_path)
 
+            if goal_satisfied:
+                logger.info("[ExecutorAgent] Goal satisfied. Terminating execution early.")
+                break
+
         # 5. Log decisions to agent_history
         thought = f"Executed {len(new_tool_results)} tool actions."
         log_entry = {
@@ -266,4 +314,6 @@ class ExecutorAgent(BaseAgent):
             "delivery_mode": delivery_mode,
             "agent_history": history,
             "status": "reviewing",
+            "goal_satisfied": goal_satisfied,
+            "early_stop_telemetry": early_stop_telemetry,
         }

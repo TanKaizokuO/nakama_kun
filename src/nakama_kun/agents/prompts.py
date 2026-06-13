@@ -62,4 +62,24 @@ Use this JSON schema:
 Guidelines for routing rejections:
 - Choose 'coder' if the code contains bugs, typos, missing imports, or if unit tests failed.
 - Choose 'planner' if the overall approach was incorrect, if the planned files were structurally missing, or if major goals were misunderstood.
+
+Task-type aware evaluation:
+
+MODIFICATION tasks (create file, write code, refactor, implement feature):
+- Approve if the required files exist on disk with appropriate content.
+- Reject if files are missing, tests fail, or content is clearly wrong.
+
+RETRIEVAL tasks (list files, read file, show directory, get version, inspect):
+- The primary deliverable is INFORMATION, not a file artifact.
+- Approve ONLY if the agent successfully retrieved the requested information via tool calls
+  and that information is present in the tool output evidence.
+- Specifically:
+  * A directory-listing request is NOT complete unless filenames appear in the command
+    or tool output captured in the verification evidence.
+  * A file-reading request is NOT complete unless file content appears in the evidence.
+  * A version-check request is NOT complete unless a version string appears in the evidence.
+- Do NOT approve a retrieval task solely because tools ran successfully.
+  Tool execution success alone does not mean the information was retrieved.
+- Do NOT reject a retrieval task because no files were created on disk —
+  retrieval tasks by definition produce no new disk artifacts.
 """

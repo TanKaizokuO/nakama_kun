@@ -1,0 +1,822 @@
+--- Page 1 ---
+Explainable Multimodal Deepfake Forensics via
+Metadata Consistency, rPPG Signals, and Visual
+Attribution
+Kush Agrawal Tanishq Bhattacharjee Dr. KG Srinivasa
+Dept of DSAI Dept of DSAI Dean Academics
+IIIT Naya Raipur IIIT Naya Raipur IIIT Naya Raipur
+Raipur, Chhattisgarh Raipur, Chhattisgarh Raipur, Chhattisgarh
+Email: kush24102@iiitnr.edu.in Email: tanishq24102@iiitnr.edu.in Email: srinivasa@iiitnr.edu.in
+Abstract—Most deepfake detection methods use supervised
+visual classifiers developed from curated datasets. While these
+methods work well in a controlled setting, they have demon-
+strated limited generalization capabilities with respect to distribu-
+tional changes, recompression, and adversarial post-processing.
+In addition, the black-box nature of these classifiers makes
+it difficult for practitioners to get much interpretability from
+them in any forensic or evidentiary-related scenarios. This
+paper proposes an explainable multimodal deepfake detection
+framework based on the integration of multiple forms of evidence
+including metadata/encoding trace consistency, physiological sig-
+nal verification, and visual artifacts. Specifically, the metadata
+consistency module identifies structural inconsistencies in the
+encoding (e.g., any variation from what would typically exist in
+an authentic instance based on timestamp, codec structure, and
+provenance); the physiological verification module verifies the
+biological plausibility (e.g., through estimating peak and trough
+of pulse measurements using remote photoplethysmography);
+and the visual artifact localization module uses convolutional
+neural networks (CNN) with Grad-CAM assignment to identify
+and/or localize visual artifacts relating to the manipulation. All
+forms of evidence from each module are integrated together by
+using a cross-evidence reasoning module, which explicitly models
+the agreement/disagreement between all sources of evidence to
+facilitate robustly and interpretably making a determination.
+This framework has created a standardized way to create
+forensic reports by including anomaly scores, visual evidence
+specific to the location of the anomaly, and explanations of
+how the detected anomaly was created (modality specific). The
+experimental evaluation of the FaceForensics++, DFDC, and
+Celeb-DF v2 datasets showed the performance of the system was
+very good. The AUC was 0.985 on the FaceForensics++, and the
+AUC values on all cross-dataset evaluated transfers were greater
+than or equal to 0.85. The ablation studies demonstrate that the
+multimodal fusion method outperforms each individual mode and
+has increased robustness under the effect of compression. The
+cross-dataset evaluations also showed high AUC values across all
+evaluation transfers.
+Index Terms—Deepfake Forensics, Multimodal Analysis, Ex-
+plainable AI, Metadata Consistency, rPPG Signals, Visual Attri-
+bution
+I. INTRODUCTION
+Generative adversarial networks (GANs) and diffusion mod-
+els are some examples of new generative models that have
+recently been created. For example, they can be used to create
+realistic synthetic video content or ‘deepfakes’. While they can
+provide many advantages in entertainment and business, they
+also pose serious risks for disinformation, phishing attacks,
+and deteriorating trust in authority figures. Thus, detecting
+deepfakes has become a significant research area within mul-
+timedia forensic science. Many current techniques utilize su-
+pervised visual classifiers that learn to identify manipulations
+based on training data sets, such as FaceForensics++. While
+most of these techniques provide high accuracy when tested
+in the laboratory setting, accuracy is frequently reduced when
+evaluating them in real-world conditions under resampling,
+compression, or attacks that have occurred after the original
+manipulation.
+In our research, we improved the traditional black box
+methodology used in investigating deep fakes by combining
+multiple forms of evidence gathered from different sources
+using a forensic reasoning process. By using different types
+of indicators about validity and manipulation together, we
+created a system that will allow for a reliable and thorough
+review of deep fakes through the use of interpretable eval-
+uations. This allows the user to understand how we came
+to an evaluation and gives evidence to analysts to assist in
+forensic investigations. Our approach considers the detection
+of deep fakes to be more than just using a model to classify
+media; instead, we approached deep fake detection evidentially
+through reasoning and hence produced a system that will give
+like all evidence-based reasoning models, provide a solid basis
+for making reliable decisions in both high-stakes environments
+and security-critical areas.
+II. LITERATUREREVIEW
+According to a review conducted by Rana et al. [1] that in-
+cluded 112 studies (2018 to 2020) on deepfake classifications
+of created deepfakes, CNN-based approaches in the realm of
+deep learning provided the best performance in regards to
+accuracy because of the superior learning capabilities of CNNs
+to learn the hierarchical nature of high-level features and to
+render subtle alterations. Challenges facing these methods of
+classification include poor generalization abilities across mul-
+tiple datasets and being overly sensitive to compression as well
+
+--- Page 2 ---
+as being vulnerable to advesarial attacks. In addition, Azeez et
+al. [2] have conducted a review of approximately 95 studies
+involving the creation and classification of deepfakes. Their
+findings support the effectiveness of multimodal approaches
+that rely on contrasting visual, physiological, temporal and
+metadata evidence to classify deepfakes. Other findings indi-
+cate the presence of biased datasets; poor performance against
+previously unseen alterations of deepfakes; and they have
+advocated for a modular evidence-fusion framework to help
+improve robustness and scalability of deepfake classifiers.
+Additionally, Selvaraju et al. [3] introduced Gradient-
+Weighted Class Activation Mapping (Grad-CAM), an explain-
+able AI technique that visualizes image regions influencing
+CNN predictions. The proposed framework incorporates Grad-
+CAM within its visual forensic module to localize manipu-
+lation artifacts and provide interpretable evidence alongside
+automated deepfake detection results.
+Using Remote Photoplethysmography (rPPG), Ciftci et al.
+[4] verified that deepfake video content can be categorized as
+such based on inconsistencies between expected and actual
+blood flow characteristics. Their research indicates that the
+hemodynamic responses of generative models do not corre-
+spond consistently; thus, rPPG can be used as an effective
+modality-independent authenticity measure. This study in-
+cludes rPPG among a variety of other evidence sources, which
+should enhance reliability in difficult circumstances, such as
+low-light conditions or media that has been recompressed.
+A similar study by Li and Lyu [5] used pixel-level analysis
+with convolutional neural networks (CNNs) to reveal visual
+artifacts associated with creating deepfake images. However,
+visual techniques generally have difficulty performing consis-
+tently across datasets and with recompressed images. There-
+fore, the proposed framework uses multiple modalities to
+combine evidence and achieve greater reliability in detection.
+The FaceForensics++ dataset was created by Rossler et al.
+[6], and it is one of the largest benchmarks of manipulated
+facial videos available today. The dataset includes videos sub-
+jected to all types of augmentation and compression methods.
+As demonstrated by Rossler et al.’s study using this dataset,
+CNN classifiers operate at a high level of accuracy on this
+single dataset but exhibit a poor generalization of many of
+these same classifiers to other datasets. Based on this find-
+ing, the proposed framework will utilize the FaceForensics++
+dataset for initial training and evaluation but will also use the
+DFDC and Celeb-DF v2 datasets to measure the framework’s
+robustness across multiple diverse datasets.
+The framework proposed by Bharati et al. [7] utilizes a
+combination of CNN classifiers and human-interpretable evi-
+dence to create an explainable deepfake detection framework
+that aids forensic analysts in their investigations of deepfakes.
+The framework proposed by Bharati et al. develops a uni-
+fied cross-evidence reasoning layer, which includes metadata
+analysis, physiological measurements, and visual attribution,
+for analysing the agreement and disagreement within multiple
+forensic findings detected across videos.
+Lastly, the two visual detection backbones for the pro-
+posed framework will be EfficientNet [8] (Tan and Le) and
+Xception [9] (Chollet). In particular, EfficientNet-B4 balances
+high accuracy with a low computational cost, while Xception
+provides the ability to detect fine-level detail of manipulated
+video artifacts, making it possible for detailed analysis of the
+functionality of visual detection methods.
+III. METHODOLOGY
+A. Problem F ormulation
+LetVdenote an input video file comprising a sequence
+ofNframes{f 1, f2, . . . , fN }accompanied by container-level
+metadataM c. The objective of deepfake forensic analysis is
+to construct a function:
+Φ : (V,M c)− →(ˆy,R),(1)
+whereˆy∈ {0,1}denotes the binary manipulation verdict
+andRis a structured forensic report encoding modality-
+wise evidence, localization maps, and an inferred genera-
+tion hypothesis. Unlike conventional binary classifiers,Φis
+decomposed into three complementary evidence-producing
+modules whose outputs are integrated through a cross-evidence
+reasoning layer.
+Formally, we define three module-level inference functions:
+ϕm :M c →(M mat, Sm),(2)
+ϕp :{f i}ROI →(ξ, Sp),(3)
+ϕv :{f i} →(Pv,L),(4)
+where∆∈ {0,1}K is a structured metadata anomaly vector,
+Sm ∈[0,1]is the metadata trust score, is the rPPG feature
+vector,S p ∈[0,1]is the physiological plausibility score,P v ∈
+[0,1]is the visual manipulation probability, andL∈ H×W is
+a pixel-level attribution map.
+There are a number of practical assumptions made regarding
+operation of this system. First, the input video should maintain
+a reasonable portion of its original Metadata, meaning that
+some (but not all) Container Header Field(s) should still be
+able to be parsed by ExifTool or MediaInfo, etc. . . [10]
+For reliable estimation of physiological signals via remote
+photoplethysmography (rPPG) at least≥30%of the frames
+will require the presence of a detectable face providing an
+adequate amount of temporal coverage for rPPG extraction.
+[4] Finally, the backbone for visual object detection will be
+pre-trained and fine-tuned on a referenced labeled dataset
+containing deepfake/manipulated images prior to its use in this
+system’s deployment. Thus, if the system has been trained in
+accordance with all three (3) of these assumptions, it will be
+able to generalize the visual detection to novel/unseen input
+video during runtime/inference. [6].
+B. System Architecture
+The architecture of this proposed framework is designed
+to be modular rather than monolithic, with each module
+processing its own type of input and producing structured
+and typed outputs [11]. This architecture allows better in-
+terpretability, extensibility, and fault-tolerance, as it allows
+
+--- Page 3 ---
+Fig. 1. System Architecture Diagram
+the incorporation of disparate forensic cues from multiple
+different analytical domains. In contrast to monolithic systems
+found in other literature which rely exclusively on a single
+deep neural network [12], this proposed framework allows
+for the integration of metadata forensics, physiological signal
+analysis and visual artefact detection into a single framework
+that allows for decision-level fusion. Each module processes a
+different form of the input media and provides complementary
+evidence for the final assessment of the authenticity of the
+input media.
+In general, the metadata forensics module focuses on deter-
+mining both contradictions and anomalous data in multimedia
+metadata. ExifTool and MediaInfo are examples of the tools
+that extract structured metadataMfrom image and video
+containers and provide details about encoding parameters,
+timestamps, codecs, frame rates, GPS coordinates, compres-
+sion history, and device signatures [10]. After extracting these
+attributes, they can be analysed through either heuristic-based
+or statistical anomaly detection methods, allowing analysts to
+determine the meta data consistency scoreS m. They may look
+for inconsistencies between codec signatures and device manu-
+facturers, abnormal timestamp explanations, and the possibility
+of several re-encodings to determine if tampering or alteration
+has occurred. Because metadata will remain partially intact
+after visual manipulation has been made, it is an additional
+source of forensic evidence that is independent of the pixel-
+related analysis.
+The physiology analysis part determines if the facial behav-
+iors you see from the observed facial behavior will have any
+biologically plausible human behaviors. This use of the remote
+photoplethysmography (rPPG) techniques (also referred to
+as CHROM and POS algorithms) will estimate the subtle
+variation of blood flow in the facial skin area based on the
+facial structure [13]. The facial tracking will use OpenCV to
+maintain a temporally stable region of interest (ROI) across all
+video frames of the video. The resulting temporal representa-
+tionxwill then be analyzed in the frequency domain using
+Fast Fourier Transforms (FFT) and then by calculating the
+signal-to-noise ratio (SNR) of the signal to help establish if the
+pulse characteristics will produce a plausible result. Finally, a
+physiological plausibility scoreS p is calculated based on the
+coherence, periodic and stability of the recovered signal. Since
+generative models of deepfake will generally be more focused
+on visual reality rather than the underlying genetic basis, it is
+difficult to create a video that maintains the true physiology.
+The visual detection module uses deep convolutional neural
+networks to analyze facial content that has been manipulated
+and perform a spatial analysis. Two architectures that provide
+strong results for image forensics and have proven well for
+feature extraction tasks include EfficientNet and Xception [3],
+[8], [9]. Like other models in this category, these architec-
+tures use an input frame or input sequence to predict the
+likelihood of manipulationP v while producing a set of spatial
+attribution mapsLusing Gradient-Weighted Class Activation
+Mapping (Grad-CAM). The spatial attribution maps allow for
+the interpretability of the model’s prediction by highlighting
+facial regions that had the strongest impact on the model
+classification decision (eg., blended edges, inconsistency in the
+texture, non-normative luminosity). This added transparency
+benefits forensic investigators by aiding them in verifying the
+automated predictions.
+Once the meta-data, physiological and visual modules gen-
+erate their respective outputs, they are then fused together
+within a fusion layer via a weighted decision-level aggregation
+process to produce an ultimately final output called a forensic
+reportR[11]. The fusion’s approach is based on combining
+the confidence levels of each of the individual modules’
+outputs, along with incorporating reliability of each module
+under different conditions of input data. For example, if there
+are two modules generating output (i.e. meta-data, and visual)
+with a meta-data gathering module generating output from a
+transcoded or stripped video file, then the framework would be
+able to continue using the remaining two modules generating
+output; if the quality of face detection was poor, then the
+framework could still conduct an analysis based on meta-
+data. The use of a modular approach increases the overall
+
+--- Page 4 ---
+robustness, scalability, and failure resistance of the framework
+when compared to using a single stream method of analysis
+[7].
+FFmpeg has a fixed sampling rate ofr f frames per second
+for frame extraction, thus ensuring that the results produced
+by frame extraction will be temporal processing results that
+will be temporally comparable. Detection of facial areas in
+each frame and bounding boxB i creation around detected
+areas, utilized by the pretrained RetinaFace model, is accom-
+plished through the use of the OpenCV library. This allows
+for tracking of facial area landmarks across adjacent frames
+through the use of temporal consistency (i.e., reducing noise
+in the image produced due to motion and improving the
+stability of the image signal) [13]. Metadata extraction is
+accomplished by extracting from the raw multimedia container
+header prior to decoding the frame and preserving the time-
+stamping information of the original provenance, thus mini-
+mizing the occurrence of potential contamination in the result
+of preprocessing operations [10].
+C. Module Design
+1) Metadata F orensics Module:Using ExifTool v12 and
+MediaInfo v23, forensic features at the encoding and container
+levels are extracted. These tools provide low-level access
+to multimedia container metadata, codec parameters, stream
+attributes, and encoding signatures. Unlike pixel-domain anal-
+ysis, metadata analysis offers insights into structural irregular-
+ities introduced during content generation, editing, transcod-
+ing, or recompression. Since most synthetic media undergo
+multiple encoding operations, metadata inconsistencies can
+serve as early indicators of manipulation even when visual
+artifacts are minimal. Therefore, the proposed framework
+integrates metadata analysis as an essential component of
+the overall forensic pipeline, complementing both visual and
+physiological analyses.
+For metadata-based forensic assessment, five primary indi-
+cators (K= 5) are extracted from the multimedia content.
+The first indicator examines codec signatures and encoder
+identifiers embedded within video containers. These include
+FFmpeg tags, vendor-specific codec information, build hashes,
+and software-generated metadata. Comparing these signatures
+with those expected from the original source can reveal
+evidence of synthetic generation or post-production modifi-
+cations.
+The second indicator analyzes frame-level bitrate patterns,
+represented by the sequence{b i}N
+i=1. Authentic videos typ-
+ically exhibit smooth bitrate variations, whereas manipulated
+content often introduces abnormal fluctuations. Statistical anal-
+ysis of bitrate behavior is therefore used to quantify encoding
+irregularities.
+The third indicator evaluates the Group of Pictures (GOP)
+structure, represented by{g k}. Original videos generally main-
+tain a consistent keyframe insertion pattern determined by
+encoder settings. Deepfake generation, editing, or re-encoding
+operations may disrupt this pattern, resulting in anomalous
+GOP structures that can be detected through forensic analysis.
+The fourth indicator assesses temporal consistency by ex-
+amining the relationship between Presentation Timestamps
+(PTS) and Decoding Timestamps (DTS) throughout the video
+stream. Legitimate multimedia content maintains proper tem-
+poral ordering during encoding and playback. Discontinuities,
+duplicated timestamps, reversals, or abnormal timing offsets
+may indicate frame insertion, deletion, interpolation, or re-
+construction processes introduced during manipulation.
+The fifth indicator calculates the completeness of metadata
+by means of a ratioρ∈[0,1]that is defined as how
+many of the required fields of metadata for that multimedia
+file/container, exist. This means that if a synthetic multimedia
+file is transcoded or edited, there may not be any or at least
+much of the standard metadata left in that file due to the
+amount of processing performed on it before it was created.
+Therefore, a lower ratio of completeness indicates that there is
+less reliable structure in that file and the integrity of the file’s
+provenance is also compromised [10].
+Each forensic indicator produces a binary anomaly flag
+ak ∈0,1, wherea k = 1denotes the presence of suspicious
+behavior. These indicators are aggregated into the metadata
+anomaly vector:
+∆ = [a1, a2, . . . , aK]⊤ ∈0,1 K.(5)
+The metadata trust scoreS m is subsequently computed as
+a weighted proportion of non-anomalous indicators:
+Sm = 1− 1
+K
+KX
+k=1
+wkak,(6)
+where the weightsw k represent the relative forensic impor-
+tance of each indicator [6]. To further strengthen anomaly
+detection, bitrate irregularities are analyzed using statisticalz-
+score thresholding. Frames whose bitrate deviates beyond3σ
+from the rolling temporal mean are flagged as potential out-
+liers, indicating abnormal compression behavior or localized
+tampering artifacts [2].
+2) Physiological Signal Module (rPPG):Remote photo-
+plethysmography (rPPG) exploits subtle periodic colour vari-
+ations in facial skin caused by cardiovascular pulsation [13].
+Faces synthesised by generative adversarial networks (GANs)
+or diffusion models lack physiologically consistent haemo-
+dynamic responses, rendering rPPG a modality-independent
+biometric consistency check [4].
+Let= [R t, Gt, Bt]⊤ denote the spatially averaged RGB
+colour vector at time stept, extracted from the tracked facial
+ROI after histogram equalisation and Gaussian spatial smooth-
+ing (σ= 3,px) [13]. The CHROM algorithm decomposes
+chrominance channels to suppress specular reflections:
+xt = 3Rt −2G t,(7)
+yt = 1.5Rt +G t −1.5B t,(8)
+PCHROM(t) =x t − σx
+σy
+·y t,(9)
+whereσ x andσ y denote the standard deviations ofxand
+yover a 30-frame sliding window [13]. The POS algorithm
+
+--- Page 5 ---
+provides a complementary estimate in the plane orthogonal
+to the skin-tone vector, offering improved robustness under
+illumination variation. Both estimates are fused via weighted
+averaging to yield a composite rPPG signalP(t)[13].
+The signal is band-pass filtered (passband0.67–3.33,Hz,
+corresponding to40–200,BPM) using a 4th-order Butterworth
+filter [13]. Fast Fourier Transform (FFT) analysis yields the
+power spectral densityS ∗P(f), and the dominant frequency
+is:
+f ∗ = arg,max∗f∈[0.67, ,3.33]S P (f).(10)
+The physiological plausibility score is formulated as:
+Sp =α·SNR(P) +β·γ P + (1−α−β)·ψ T ,(11)
+whereSNR(P)is the signal-to-noise ratio of the dominant
+spectral peak,γ P ∈[0,1]is a periodicity consistency score
+(ratio of energy in the fundamental and its harmonics to
+total spectral energy), andψ T is a temporal coherence score
+measured as the mean normalised cross-correlation of rPPG
+segments across non-overlapping 5-second windows [13]. Co-
+efficients are set empirically atα= 0.5,β= 0.3.
+3) Visual Detection and Attribution Module:Frame-
+level manipulation detection employs a CNN backbone
+(EfficientNet-B4 or Xception) pre-trained on FaceForensics++,
+with the final fully connected layer replaced by a two-class
+softmax classifier fine-tuned on the target domain [6], [8],
+[9]. Each face-cropped, resized frame (224×224,px) yields
+a frame-level manipulation probabilityp (i)
+v ∈[0,1][2]. The
+video-level score is:
+Pv = 1
+|N ∗trim|
+X
+∗i∈ N ∗trimp(i)
+v ,(12)
+whereN ∗trimexcludes the top and bottom 10
+For spatial interpretability, Gradient-weighted Class Activa-
+tion Mapping (Grad-CAM) is applied at the final convolutional
+layer [3]. LetA k
+ij denote the activation of feature mapkat
+spatial location(i, j), andy c the class score. The per-frame
+attribution map is:
+αc
+k = 1
+Z
+X
+i,j
+∂y c
+∂Ak
+ij
+,L (frame)
+v = ReLU!
+ X
+k
+αc
+k, Ak
+!
+.
+(13)
+Per-frame maps are aggregated by pixel-wise maximum across
+allNframes, yielding the video-level localization map
+L∈ H×W [3]. Regions whereL > τ= 0.5are classified
+as spatially localised manipulation zones [7].
+D. Cross-Evidence Fusion and F orensic Reasoning Layer
+1) Cross-Modal Consistency Modelling:Rather than ag-
+gregating modality scores through simple weighted averaging,
+the proposed fusion layer explicitly models theagreementand
+disagreementamong heterogeneous forensic evidence streams.
+This enables the system to generate interpretable forensic
+hypotheses based on cross-modal consistency patterns while
+preserving transparency in the decision-making process [11].
+Let the evidence tuple be defined as
+E= (S m, Sp, Pv,∆, L),(14)
+whereS m denotes the metadata consistency score,S p
+represents the physiological plausibility score,P v is the visual
+manipulation probability,∆is the metadata anomaly vector,
+andLcorresponds to the visual attribution map. The fusion
+function is defined as
+F:E − →(ˆy,H,R),(15)
+whereˆydenotes the final manipulation verdict,Hrepre-
+sents an inferred forensic hypothesis, andRis the structured
+forensic report generated by the system [7].
+The hypothesis spaceH 1,H 2,H 3,H 4 is derived from
+threshold-based consistency relationships between metadata
+and physiological evidence streams [10]:
+H1 (Authentic) :S m > τm ∧S p > τp,
+(16)
+H2 (Synthetic Generation) :S m < τm ∧S p < τp,
+(17)
+H3 (Post-processed Authentic) :S m < τm ∧S p > τp,
+(18)
+H4 (Face Replacement) :S m > τm ∧S p < τp.
+(19)
+where the default thresholds are set toτ m =τ p = 0.5.
+The purpose of these hypotheses is to provide interpretable
+forensic explanations as opposed to supervised ground-truth
+classes. Specifically, scenario 1 (H2) accounts for the existence
+of metadata inconsistencies in addition to physiologically
+implausible rPPG signals that jointly suggest the possibility
+of the generation of synthetic content [4]. Similarly, scenario
+2 (H 3) accounts for cases where physiological signals con-
+tinue to be consistent with real content, even though there
+are metadata anomalies indicating the possibility of post-
+processing [10]. Finally, scenario 3 (H4) defines circumstances
+in which there are no significant metadata anomalies but the
+physiological signals are inconsistent with the original content,
+which is typically viewed as evidence of facial replacement
+manipulations [13].
+In this study’s benchmark datasets, only two different types
+of authenticity are being identified (real or manipulated);
+there is no use of supervised target classes for hypotheses
+H1-H4 during training either. Instead, the hypotheses exist
+purely to allow the reasoning layer to provide understandable
+rationale to support the final decision making from the forensic
+perspective.
+2) Fusion Algorithm:The final forensic scoreF score is
+computed as a convex combination of the modality-specific
+outputs, subject to the constraintw 1 +w 2 +w 3 = 1. In
+this work, the fusion weights were empirically selected as
+w1 = 0.4,w 2 = 0.3, andw 3 = 0.3, assigning slightly
+greater importance to the visual evidence stream because
+
+--- Page 6 ---
+it demonstrated the strongest standalone performance dur-
+ing preliminary experiments. The physiological and metadata
+modules contribute complementary forensic information that
+improves robustness under compression, post-processing, and
+cross-dataset evaluation.
+A global decision threshold ofτ f = 0.5is used to
+convert the fused forensic score into the final manipulation
+verdict. During deployment, the fusion process is adaptively
+conditioned on the inferred hypothesisH. UnderH 2 (Synthetic
+Generation), the contributions of the visual and physiological
+modules are increased because both modalities are expected
+to exhibit strong manipulation signatures. UnderH 3 (Post-
+processed Authentic Content), greater emphasis is placed on
+metadata evidence, as structural inconsistencies may remain
+observable even when physiological and visual characteristics
+appear authentic. This adaptive weighting strategy improves
+interpretability while maintaining robustness across diverse
+manipulation
+3) F orensic Report Generation:The forensic reportRcom-
+prises: (i) the deepfake likelihood scoreF score; (ii) modality-
+wise evidence summaries including anomaly vectors and in-
+dividual scores; (iii) the localisation heatmapLrendered as
+a visual overlay; (iv) the inferred hypothesisHwith associ-
+ated confidence; and (v) a reconstructed inferred processing
+pipeline derived from the anomaly pattern in∆andH[7].
+The report is structured to satisfy evidentiary standards for
+human review in legal and OSINT work, providing traceable,
+modality-attributed justifications for each verdict [7].
+E. Computational Complexity and Robustness
+The metadata component operates in constant time for each
+video while the rPPG part scales linearly with the number of
+frames (n) at the expense of a complex FFT-based spectral
+analysis withO(NlogN)complexity. The visual detector is
+the main computational bottleneck, requiringO(N·C cnn)
+computations, which when using EfficientNet-B4 consumes
+approximately 4.2 GFLOPs/frame. For example, a 10-second
+video with 300 total frames will require approximately 12
+seconds of inference on an(NVIDIA) A100 GPU. In order
+to mitigate this issue and improve robustness against adverse
+conditions, all three methods described above: i) metadata;
+ii) rPPG extraction in the YCbCr colour model; and iii)
+augmentation through compression/blur distortion, access the
+same independent variables that allow for remarkable visual
+fusion between each of the three methods. If either metadata or
+a detected facial (face) of a participant has been compromised,
+the three methods will apply adaptive fusion to provide reliable
+inference results.
+Final decisions were generated through weighted multi-
+modal fusion (w 1 = 0.4,w 2 = 0.3,w 3 = 0.3) with a decision
+threshold ofτ f = 0.5. Performance was evaluated using
+Accuracy, F1-score, and Area Under the Receiver Operating
+Characteristic Curve (AUC-ROC), with results averaged over
+three independent runs.
+F . Experimental Setup
+The proposed framework was evaluated on three benchmark
+datasets: FaceForensics++ (FF++), DeepFake Detection Chal-
+lenge (DFDC), and Celeb-DF v2. FaceForensics++ served as
+the primary benchmark, while DFDC and Celeb-DF v2 were
+used to assess robustness and cross-dataset generalization. To
+prevent data leakage, all datasets were partitioned using a
+70%–15%–15% train–validation–test split with subject-level
+separation.
+Experiments were conducted on an NVIDIA A100 GPU.
+The visual detection module employed EfficientNet-B4 and
+Xception backbones initialized with ImageNet pre-trained
+weights and fine-tuned using the Adam optimizer. Input facial
+regions were resized to224×224pixels, and data augmen-
+tation included horizontal flipping, JPEG recompression, and
+Gaussian blur.
+The physiological module extracted rPPG signals at 30 fps
+and applied band-pass filtering within the 40–200 BPM range,
+while metadata features were obtained using ExifTool and
+MediaInfo. Final predictions were generated through weighted
+multimodal fusion (w 1 = 0.4,w 2 = 0.3,w 3 = 0.3) with a
+decision threshold ofτ f = 0.5. Performance was evaluated
+using Accuracy, F1-score, and AUC-ROC, averaged across
+three independent runs.
+IV. RESULTS AND EVALUATION
+The proposed Explainable Multimodal Deepfake Forensics
+framework was evaluated on three benchmark datasets: Face-
+Forensics++ (FF++), DFDC, and Celeb-DF v2. The experi-
+mental configuration described in Section III-F was used for
+all evaluations.
+A. Benchmark Performance
+Table I summarizes the performance of the proposed frame-
+work across the three benchmark datasets.
+TABLE I
+PERFORMANCE ONDEEPFAKEBENCHMARKS(MEAN±STD, 3RUNS)
+Dataset Acc. (%) F1 (%) AUC
+FaceForensics++ 96.2±0.47 95.9±0.58 0.985±0.003
+DFDC 91.4±0.82 90.8±0.74 0.949±0.006
+Celeb-DF v2 89.3±1.05 88.7±0.91 0.932±0.008
+The proposed framework achieves its highest performance
+on FaceForensics++, obtaining an AUC of 0.985 and an
+accuracy of 96.2%. This result can be attributed to the
+relatively consistent manipulation patterns present in FF++
+samples. Performance on DFDC and Celeb-DF v2 is mod-
+erately lower due to increased diversity of manipulation tech-
+niques, compression settings, and post-processing operations.
+Nevertheless, the multimodal architecture maintains strong
+detection performance across all benchmarks, demonstrating
+robust generalization across different datasets and manipula-
+tion scenarios.
+
+--- Page 7 ---
+Fig. 2. Multimodal forensic analysis of a FaceForensics++ video. The figure
+shows extracted rPPG signals, rPPG power spectral density, frame-level visual
+manipulation scores, and Grad-CAM attribution maps used by the proposed
+framework to generate an explainable deepfake detection verdict.
+B. Cross-Dataset Generalization
+To evaluate generalization beyond the training distribution,
+cross-dataset experiments were conducted. Models trained on
+one benchmark were evaluated on previously unseen datasets.
+TABLE II
+CROSS-DATASETEVALUATION
+Training Dataset Testing Dataset AUC
+FaceForensics++ Celeb-DF v2 0.882
+FaceForensics++ DFDC 0.864
+DFDC Celeb-DF v2 0.857
+Celeb-DF v2 FaceForensics++ 0.895
+Although performance decreases compared with within-
+dataset evaluation, all transfer scenarios maintain AUC values
+above 0.85. These results suggest that the proposed multimodal
+framework is resilient to dataset bias and manipulation-specific
+artifacts, maintaining AUC values above 0.85 across all eval-
+uated transfer scenarios.
+C. Compression Robustness
+Since manipulated media is frequently distributed through
+social media platforms that introduce compression artifacts,
+robustness under varying compression levels was investigated.
+The framework demonstrates graceful degradation as com-
+pression severity increases. While visual artifacts become in-
+creasingly difficult to detect at lower quality factors, metadata
+TABLE III
+PERFORMANCEUNDERCOMPRESSION
+JPEG Quality Accuracy (%) F1-score (%) AUC
+95 96.2 96.1 0.985
+75 94.2 94.0 0.972
+50 91.1 90.8 0.948
+30 87.6 87.2 0.918
+and physiological evidence continue contributing useful foren-
+sic signals, thereby preserving overall detection performance.
+D. Ablation Study
+An ablation study was conducted to quantify the contribu-
+tion of each modality.
+TABLE IV
+ABLATIONANALYSIS(AUC,MEAN±STD, 3RUNS)
+Configuration AUC
+Visual Only 0.918±0.008
+rPPG Only 0.811±0.015
+Metadata Only 0.774±0.018
+Visual + rPPG 0.946±0.006
+Visual + Metadata 0.937±0.007
+rPPG + Metadata 0.869±0.012
+Full System 0.985±0.004
+The visual detector provides the strongest standalone per-
+formance due to its direct access to spatial and temporal
+manipulation artifacts. However, physiological and metadata-
+based evidence contribute complementary information that is
+not readily available through visual analysis alone. The inte-
+gration of all three modalities yields the highest performance,
+achieving an AUC of 0.985. This result demonstrates that
+each modality contributes unique forensic evidence and that
+multimodal fusion improves overall detection reliability and
+robustness.
+E. Qualitative Explainability Analysis
+Tests for evaluation of the proposed multimodal deepfake
+forensics framework have been performed with the use of
+a single video representation. Such as using rPPG signals,
+frequency spectrums, estimating deepfake probabilities and
+the Grad-CAM method of explanation. Results showed overall
+inconsistent (Sm = 0.65) with regard to metadata; inconsistent
+(Sp = 0.61) with respect to physiological patterns; and
+likely indicatives of synthetic content (P v = 0.87).Figure 2
+illustrates four complementary sources of forensic evidence
+generated by the system.
+The final forensic decision was obtained through weighted
+multimodal fusion according to
+Fscore =w 1Pv +w 2(1−S p) +w 3(1−S m),(20)
+wherew 1 = 0.4,w 2 = 0.3, andw 3 = 0.3denote the modality-
+specific fusion weights, and(1−S p),(1−S m)convert
+plausibility and trust scores into anomaly-oriented terms such
+that higher values indicate greater likelihood of manipulation.
+Substituting the observed values yields
+
+--- Page 8 ---
+Fscore = 0.4(0.87)+0.3(1−0.61)+0.3(1−0.65) = 0.57.(21)
+The resulting forensic score of0.570exceeded the prede-
+fined decision thresholdτ f = 0.5, leading to classification of
+the video as manipulated with a forensic confidence of57.0%.
+Qualitative analysis shows that Grad-CAM visualizations
+consistently highlight facial regions prone to synthesis arti-
+facts, while physiological signals exhibit reduced pulse con-
+sistency and metadata reveals subtle encoding irregularities.
+Together, these modalities provide transparent explanations for
+classification decisions.
+F . Cross-Modal Consistency Analysis
+The framework improves reliability by jointly analyzing vi-
+sual, physiological, and metadata evidence. Individual modal-
+ities may provide weak manipulation cues, but their combined
+agreement forms a stronger forensic narrative and increases
+confidence in detection. Conversely, modality disagreements
+can indicate partial manipulations or post-processing effects.
+This multimodal consistency reasoning enhances robustness,
+interpretability, and generalization compared with unimodal
+deepfake detection approaches.
+G. Discussion
+The experimental results validate the central hypothesis
+that multimodal forensic reasoning improves deepfake detec-
+tion reliability. Across all benchmark datasets, the proposed
+framework consistently outperformed unimodal configurations
+while maintaining strong generalization capability under cross-
+dataset evaluation. A key observation is that performance
+degradation under compression remains significantly smaller
+than commonly reported for purely visual detectors. This
+behavior suggests that physiological and metadata-based sig-
+nals provide resilience when visual artifacts become par-
+tially obscured. Although promising, limitations remain. The
+physiological module requires sufficient facial visibility and
+video quality for reliable signal extraction. Future work will
+investigate transformer-based multimodal fusion, adversarial
+robustness, and large-scale real-world forensic validation.
+V. CONCLUSION
+The proposed framework for explainable multimodal deep-
+fake forensics has demonstrated that integrating metadata
+consistency analysis, physiological validation using remote
+photoplethysmography (rPPG), and visual attribution has sig-
+nificantly improved detection accuracy and interpretability.
+Unlike many traditional unimodal methods that are focused
+primarily on finding visual artifacts of manipulated videos, this
+proposed framework is designed to integrate and utilize several
+sources of evidence so the forensic analysis can provide a
+transparent and trustworthy evaluation of authenticity. Exper-
+imental results with benchmark datasets showed a substantial
+improvement in performance compared to the best unimodal
+baseline (an AUC of 0.985 on FaceForensics++ compared
+to an AUC of 0.918 on the best unimodal baseline), with
+almost all cross-dataset evaluations exceeding an AUC of 0.85;
+thus, indicating that this framework generalizes well across
+a variety of video manipulation techniques. The framework
+also performs well in the presence of real-world degradations
+(such as JPEG compression, noise, and post-processing), by
+using complementary physiological and metadata signals to
+provide reliable evidence when visual cues become weak-
+ened. Additionally, the proposed framework can create human-
+readable forensic reports, which include evidence localization,
+confidence scores associated with each piece of evidence, and
+interpretable explanations of the analysis performed. Finally,
+an adaptive fusion approach will allow for graceful degradation
+of performance in the case of partial input failure, thereby
+making this framework practical, reliable, and explainable for
+forensic applications in real-world scenarios.
+REFERENCES
+[1] M. S. Rana, M. N. Nobi, B. Murali, and A. H. Sung, “Deepfake
+detection: A systematic literature review,”IEEE Access, vol. 10, pp.
+25 494–25 513, 2022.
+[2] A. Heidari, N. Jafari Navimipour, H. Dag, and M. Unal,
+“Deepfake detection using deep learning methods: A systematic
+and comprehensive review,”WIREs Data Mining and Knowledge
+Discovery, vol. 14, no. 2, p. e1520, 2024. [Online]. Available:
+https://wires.onlinelibrary.wiley.com/doi/abs/10.1002/widm.1520
+[3] R. R. Selvaraju, M. Cogswell, A. Das, R. Vedantam, D. Parikh, and
+D. Batra, “Grad-cam: Visual explanations from deep networks via
+gradient-based localization,” in2017 IEEE International Conference on
+Computer Vision (ICCV), 2017, pp. 618–626.
+[4] U. A. Ciftci, I. Demir, and L. Yin, “Fakecatcher: Detection of synthetic
+portrait videos using biological signals,”IEEE Transactions on Pattern
+Analysis and Machine Intelligence, vol. PP, pp. 1–1, 2020.
+[5] Y . Li and S. Lyu, “Exposing deepfake videos by detecting face warping
+artifacts,” inCVPR Workshops, 2019.
+[6] A. Rossler, D. Cozzolino, L. Verdoliva, C. Riess, J. Thies, and M. Niess-
+ner, “Faceforensics++: Learning to detect manipulated facial images,” in
+ICCV, 2019.
+[7] N. Bharati, P. Wong, S. K. Most ´efaoui, D. Kbaier, and J. Collie, “Ex-
+plainable deepfake detection: A multi-model framework with human-
+interpretable rationales for legal investigation purposes,”Machine Learn-
+ing with Applications, vol. 23, p. 100819, 2026. [Online]. Available:
+https://www.sciencedirect.com/science/article/pii/S2666827025002026
+[8] M. Tan and Q. V . Le, “Efficientnet: Rethinking model scaling for
+convolutional neural networks,” inProceedings of the 36th International
+Conference on Machine Learning (ICML 2019), ser. Proceedings of
+Machine Learning Research, K. Chaudhuri and R. Salakhutdinov, Eds.,
+vol. 97. Long Beach, California, USA: PMLR, Jun. 2019, pp. 6105–
+6114. [Online]. Available: http://proceedings.mlr.press/v97/tan19a.html
+[9] F. Chollet, “Xception: Deep learning with depthwise separable convolu-
+tions,” inProceedings of the IEEE Conference on Computer Vision and
+Pattern Recognition (CVPR), 2017, pp. 1800–1807.
+[10] G. Bendiab, H. Haiouni, I. Moulas, and S. Shiaeles,
+“Deepfakes in digital media forensics: Generation, ai-based
+detection and challenges,”Journal of Information Security and
+Applications, vol. 88, p. 103935, 2025. [Online]. Available:
+https://www.sciencedirect.com/science/article/pii/S2214212624002370
+[11] S. A. Jr, “A hybrid deep learning and forensic approach for robust
+deepfake detection,”International Journal of Advanced Computer
+Science and Applications, vol. 16, no. 10, 2025. [Online]. Available:
+http://dx.doi.org/10.14569/IJACSA.2025.0161028
+[12] S. Mazumdar, T. Mondal, T. Bhattacharjee, T. K. Bera, U. Pal, and
+A. Giri, “Agricultural robot: Enhancing farming efficiency through iot
+and ai/ml,” in2025 International Conference on Modern Sustainable
+Systems (CMSS), 2025, pp. 806–811.
+[13] J. Hernandez-Ortega, R. Tolosana, J. Fierrez, and A. Morales,
+“Deepfakeson-phys: Deepfakes detection based on heart rate estimation,”
+2020. [Online]. Available: https://arxiv.org/abs/2010.00400
+

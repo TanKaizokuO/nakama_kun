@@ -6,6 +6,7 @@ from typing import Annotated, Any, TypedDict
 from nakama_kun.ai.models.message import Message
 from nakama_kun.ai.models.plan import Plan
 from nakama_kun.orchestration.evidence import EvidenceStore
+from nakama_kun.orchestration.task_classifier import TaskType
 from nakama_kun.orchestration.verification import VerificationReport
 
 
@@ -70,6 +71,18 @@ class AgentState(TypedDict):
 
     # Target agent routing for rejection feedback (e.g. 'planner' or 'coder')
     reviewer_route: str | None
+
+    # Lightweight task classification used by the Final Response Node to choose
+    # between retrieval-focused and metrics-focused response strategies.
+    # Set by the Planner node from the goal string via task_classifier.classify_task().
+    task_type: TaskType
+
+    # True if the user's goal (specifically retrieval) is satisfied and no more tools are needed.
+    goal_satisfied: bool
+
+    # Telemetry captured when early termination is triggered
+    early_stop_telemetry: dict[str, Any] | None
+
 
 
 class RetryMemory(TypedDict):

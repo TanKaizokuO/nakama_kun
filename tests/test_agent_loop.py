@@ -133,7 +133,7 @@ class TestAgentLoop:
 
         history: list[Message] = []
         result = asyncio.run(
-            agent._agent_loop("Tell me something", history, [])
+            agent._agent_loop("Perform a task", history, [])
         )
 
         assert result == "Direct answer."

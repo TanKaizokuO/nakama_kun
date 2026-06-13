@@ -21,6 +21,26 @@ from nakama_kun.tools import ToolRegistry, ToolRouter
 
 def route_after_review(state: AgentState) -> str:
     """Determine the next node to route to based on QA review feedback and retries."""
+    from nakama_kun.orchestration.goal_satisfaction import check_goal_satisfaction
+    
+    goal = state.get("goal")
+    task_type = state.get("task_type") or "MODIFICATION"
+    tool_results = state.get("tool_results", [])
+    evidence_store = state.get("evidence_store")
+    agent_history = state.get("agent_history", [])
+    
+    gsr = check_goal_satisfaction(
+        task=goal,
+        task_type=task_type,
+        tool_outputs=tool_results,
+        evidence_store=evidence_store,
+        execution_history=agent_history,
+    )
+    
+    if gsr.goal_satisfied or state.get("goal_satisfied", False):
+        logger.info("[LangGraph] Goal satisfied. Bypassing QA rejection / retry routing to final response.")
+        return "final_response"
+
     feedback = state.get("reviewer_feedback")
     retry_count = state.get("retry_count", 0)
 
@@ -44,6 +64,14 @@ def route_after_review(state: AgentState) -> str:
         f"[LangGraph] QA rejected. Routing back to {route.capitalize()} Node (Retry {retry_count + 1}/3)."
     )
     return route
+
+
+def route_after_executor(state: AgentState) -> str:
+    """Determine the next node to route to after the Executor."""
+    if state.get("goal_satisfied", False):
+        logger.info("[LangGraph] Goal satisfied early. Routing directly to final response.")
+        return "final_response"
+    return "verifier"
 
 
 def build_agent_graph(
@@ -76,8 +104,18 @@ def build_agent_graph(
     workflow.add_edge(START, "planner")
     workflow.add_edge("planner", "coder")
     workflow.add_edge("coder", "executor")
+    
+    # Conditional routing after Executor to skip Verifier/Reviewer if goal is satisfied
+    workflow.add_conditional_edges(
+        "executor",
+        route_after_executor,
+        {
+            "verifier": "verifier",
+            "final_response": "final_response",
+        },
+    )
+    
     # Verifier inspects the real workspace before the Reviewer evaluates results
-    workflow.add_edge("executor", "verifier")
     workflow.add_edge("verifier", "reviewer")
 
     # Conditional routing after QA Review

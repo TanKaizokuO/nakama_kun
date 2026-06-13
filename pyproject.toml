@@ -21,6 +21,7 @@ dependencies = [
     "chromadb>=0.4.0",
     "mcp>=0.1.0",
     "fastapi>=0.136.3",
+    "pypdf>=6.13.2",
 ]
 
 [project.scripts]

@@ -30,6 +30,7 @@ from nakama_kun.cli.commands import (
     wakeup_command,
     web_command,
 )
+from nakama_kun.cli.list_dir import list_directory
 
 # ---------------------------------------------------------------------------
 # Typer application
@@ -81,6 +82,11 @@ app.command(
     name="web",
     help="Launch the browser-based graphical web interface.",
 )(web_command)
+
+app.command(
+    name="list-directory",
+    help="List the contents of a given directory.",
+)(list_directory)
 
 # ---------------------------------------------------------------------------
 # Phase 3+ extension points — uncomment as phases are implemented:

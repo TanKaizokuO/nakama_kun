@@ -13,7 +13,12 @@ from nakama_kun.ai.prompts.system_prompt import (
 from nakama_kun.ai.services.chat_service import ChatService
 from nakama_kun.ai.services.planner_service import PlannerService
 from nakama_kun.orchestration.evidence import build_evidence_store
+from nakama_kun.orchestration.goal_satisfaction import check_goal_satisfaction
 from nakama_kun.orchestration.state import AgentState, RetryMemory
+from nakama_kun.orchestration.task_classifier import (
+    TASK_TYPE_RETRIEVAL,
+    classify_task,
+)
 from nakama_kun.orchestration.verification import VerificationLayer
 from nakama_kun.tools import ToolRegistry, ToolRouter
 from nakama_kun.tools.interfaces import ToolResult
@@ -306,14 +311,17 @@ def make_planner_node(planner_service: PlannerService) -> Callable[[AgentState],
                 retry_memory = state.get("retry_memory") or _empty_retry_memory()
 
             agent_state["retry_memory"] = retry_memory
-            
+
             agent = PlannerAgent(chat_service)
             res = await agent.run(agent_state)
-            
+
             res["retry_count"] = retry_count
             res["retry_memory"] = retry_memory
             res["research_budget_remaining"] = state.get("research_budget_remaining", RESEARCH_THRESHOLD)
             res["delivery_mode"] = state.get("delivery_mode", False)
+            # Classify on first pass; keep existing classification on retries.
+            res["task_type"] = state.get("task_type") or classify_task(state["goal"])
+            res["goal_satisfied"] = state.get("goal_satisfied", False)
             return res
 
         # Legacy logic (exactly as before) for backward compatibility
@@ -457,6 +465,9 @@ def make_planner_node(planner_service: PlannerService) -> Callable[[AgentState],
             "research_budget_remaining": state.get("research_budget_remaining", RESEARCH_THRESHOLD),
             "delivery_mode": state.get("delivery_mode", False),
             "retry_memory": retry_memory,
+            # Classify on first pass; keep existing classification on retries.
+            "task_type": state.get("task_type") or classify_task(goal),
+            "goal_satisfied": state.get("goal_satisfied", False),
             "messages": [
                 Message(role="assistant", content=f"Planner proposed Plan:\n{raw_text}")
             ],
@@ -518,6 +529,22 @@ def make_executor_node(
             return res
 
         # Legacy logic (exactly as before) for backward compatibility
+        goal_satisfied = state.get("goal_satisfied", False)
+        task_type = state.get("task_type") or classify_task(state["goal"])
+
+        if goal_satisfied:
+            logger.info("[LangGraph] Executor Node: Goal already satisfied. Skipping.")
+            return {
+                "messages": [],
+                "tool_results": [],
+                "created_artifacts": list(state.get("created_artifacts", [])),
+                "missing_artifacts": [],
+                "research_budget_remaining": state.get("research_budget_remaining", 15),
+                "delivery_mode": state.get("delivery_mode", False),
+                "status": "reviewing",
+                "goal_satisfied": True,
+            }
+
         goal = state["goal"]
         plan = state["plan"]
         plan_desc = plan.goal_summary if plan else "Execute target goal."
@@ -561,7 +588,11 @@ def make_executor_node(
             (state.get("retry_memory") or {}).get("failed_attempt_signatures", [])
         )
 
+        early_stop_telemetry = state.get("early_stop_telemetry")
+
         for round_idx in range(1, max_rounds + 1):
+            if goal_satisfied:
+                break
             logger.info(f"[LangGraph] Executor Round {round_idx}/{max_rounds}...")
 
             missing_artifacts = _missing_required_artifacts(required_artifacts, created_artifacts)
@@ -651,7 +682,7 @@ def make_executor_node(
                     )
                 else:
                     try:
-                        result = await tool_router.dispatch(name, arguments)
+                        result = await tool_router.dispatch(name, arguments, task_type=task_type)
                         success = result.success
                         content = result.to_content()
                     except Exception as exc:
@@ -712,6 +743,33 @@ def make_executor_node(
                     }
                 )
 
+                if success and not goal_satisfied:
+                    gsr = check_goal_satisfaction(
+                        task=goal,
+                        task_type=task_type,
+                        tool_outputs=new_tool_results,
+                        evidence_store=state.get("evidence_store"),
+                        execution_history=state.get("agent_history", []),
+                    )
+                    if gsr.goal_satisfied:
+                        goal_satisfied = True
+                        early_stop_telemetry = {
+                            "stop_reason": gsr.explanation,
+                            "stop_round": round_idx,
+                            "evidence_used": new_tool_results[-1] if new_tool_results else None,
+                        }
+                        logger.info(
+                            f"[LangGraph] GoalSatisfactionDetector: {gsr.explanation} "
+                            f"(confidence={gsr.confidence:.2f})"
+                        )
+
+                if goal_satisfied:
+                    break
+
+            if goal_satisfied:
+                logger.info("[LangGraph] Goal satisfied. Terminating execution early.")
+                break
+
         return {
             "messages": new_messages,
             "tool_results": new_tool_results,
@@ -720,6 +778,8 @@ def make_executor_node(
             "research_budget_remaining": research_budget_remaining,
             "delivery_mode": delivery_mode,
             "status": "reviewing",
+            "goal_satisfied": goal_satisfied,
+            "early_stop_telemetry": early_stop_telemetry,
         }
 
     return executor_node
@@ -814,6 +874,8 @@ def make_reviewer_node(chat_service: ChatService) -> Callable[[AgentState], Any]
         verification_report = state.get("verification_report")
         evidence_store = state.get("evidence_store")
         missing_artifacts = state.get("missing_artifacts", [])
+        task_type = state.get("task_type") or classify_task(goal)
+        goal_satisfied = state.get("goal_satisfied", False)
 
         if missing_artifacts:
             feedback = (
@@ -899,60 +961,103 @@ def make_reviewer_node(chat_service: ChatService) -> Callable[[AgentState], Any]
             lines.append("=== END EVIDENCE STORE ===")
             evidence_store_block = "\n".join(lines)
 
-        review_prompt = (
-            f"You are a quality control reviewer evaluating whether a task has been completed.\n\n"
-            f"Original Goal: {goal}\n"
-            f"Proposed Plan: {plan_str}\n\n"
-            f"--- DECISION HIERARCHY (follow strictly, in priority order) ---\n\n"
-            f"  1. PRIMARY — Artifact Existence (HIGHEST PRIORITY)\n"
-            f"     If the requested files/artifacts exist on disk with appropriate content,\n"
-            f"     the goal has been achieved. This is sufficient to APPROVE.\n"
-            f"     Intermediate tool failures are IRRELEVANT if a fallback produced the artifact.\n"
-            f"     If a file is physically missing from the final disk state but is recorded in the\n"
-            f"     Evidence Store as successfully read or verified during execution (source: tool_read or tool_write),\n"
-            f"     and it was not a required final output artifact, do NOT reject the task based on that file being missing.\n\n"
-            f"  2. SECONDARY — Test / Command Results\n"
-            f"     If tests ran and passed (Exit Code 0), this CONFIRMS the artifacts are correct.\n"
-            f"     If tests ran and FAILED (non-zero exit code), this OVERRIDES artifact existence → REJECT.\n\n"
-            f"  3. TERTIARY — Tool Execution History (LOWEST PRIORITY)\n"
-            f"     Intermediate failures (e.g. a first write_file attempt that failed before a\n"
-            f"     successful fallback) are INFORMATIONAL ONLY.\n"
-            f"     A ❌ FAIL on an intermediate tool MUST NOT cause rejection if the final\n"
-            f"     artifact exists on disk. Do not penalise the use of fallback mechanisms.\n\n"
-            f"--- PRE-COMPUTED OUTCOME SIGNAL ---\n"
-            f"A deterministic classifier has already evaluated the evidence using the above\n"
-            f"hierarchy. Trust this signal strongly:\n\n"
-            f"{signal_header}\n\n"
-            f"--- FULL EVIDENCE ---\n"
-            f"{evidence_block}\n\n"
-        )
-        if evidence_store_block:
-            review_prompt += (
-                f"--- EVIDENCE STORE (HISTORICAL EXECUTION EVIDENCE) ---\n"
-                f"{evidence_store_block}\n\n"
+        if task_type == "RETRIEVAL":
+            review_prompt = (
+                f"You are a quality control reviewer evaluating whether a retrieval task has been completed.\n\n"
+                f"Original Goal: {goal}\n"
+                f"Proposed Plan: {plan_str}\n"
+                f"Goal Satisfied (Evidence Collected): {goal_satisfied}\n\n"
+                f"--- DECISION HIERARCHY FOR RETRIEVAL (follow strictly, in priority order) ---\n\n"
+                f"  1. PRIMARY — Requested Information Presence (HIGHEST PRIORITY)\n"
+                f"     This is a RETRIEVAL task. The primary deliverable is INFORMATION (e.g. directory listing, file content, version output).\n"
+                f"     If the requested information has been successfully collected via tool calls and is present in the evidence below,\n"
+                f"     you MUST APPROVE. The goal_satisfied flag is {goal_satisfied}.\n"
+                f"     Do NOT reject the task because no files were created or modified on disk, or because more work/steps could theoretically be done.\n\n"
+                f"  2. SECONDARY — Command Results\n"
+                f"     If retrieval commands ran and succeeded (Exit Code 0), this confirms the information is collected.\n"
+                f"     If any retrieval command explicitly failed with non-zero exit code, and no fallback collected the information → REJECT.\n\n"
+                f"--- FULL EVIDENCE ---\n"
+                f"{evidence_block}\n\n"
             )
-        review_prompt += (
-            "--- DECISION RULES ---\n"
-            "APPROVE if:\n"
-            "  - Outcome signal is APPROVE, OR\n"
-            "  - Requested artifacts exist on disk AND no tests failed,\n"
-            "  - OR a file is physically missing but the Evidence Store validates it was successfully read/written during tool run.\n\n"
-            "REJECT only if you have concrete evidence of failure:\n"
-            "  - Required files are explicitly confirmed MISSING from disk and have no successful read/write record in the Evidence Store, OR\n"
-            "  - A test/validation command exited with a non-zero code, OR\n"
-            "  - File content is clearly wrong or empty for the stated goal.\n\n"
-            "Do NOT reject because:\n"
-            "  - An intermediate tool attempt failed (fallback may have succeeded)\n"
-            "  - The tool history shows any ❌ markers on non-final steps\n"
-            "  - You cannot see something that wasn't required\n\n"
-            "Respond in EXACTLY this format:\n"
-            "If approved:\n"
-            "[APPROVED]\n"
-            "<One paragraph citing the key evidence: which files exist, which tests passed>\n\n"
-            "If rejected:\n"
-            "[REJECTED]\n"
-            "<Bulleted list of CONCRETE evidence of failure — cite specific paths, exit codes, or content>"
-        )
+            if evidence_store_block:
+                review_prompt += (
+                    f"--- EVIDENCE STORE (HISTORICAL EXECUTION EVIDENCE) ---\n"
+                    f"{evidence_store_block}\n\n"
+                )
+            review_prompt += (
+                "--- DECISION RULES ---\n"
+                "APPROVE if:\n"
+                "  - The requested information is present in the evidence/tool outputs, OR\n"
+                "  - goal_satisfied is True.\n\n"
+                "REJECT only if you have concrete evidence of failure:\n"
+                "  - The requested information was not collected or is completely missing from all tool outputs, OR\n"
+                "  - The retrieval tool failed with a non-zero exit code/error and no fallback succeeded.\n\n"
+                "Do NOT reject because:\n"
+                "  - No files were written to disk (retrieval tasks do not write files)\n"
+                "  - More tools could have been executed\n\n"
+                "Respond in EXACTLY this format:\n"
+                "If approved:\n"
+                "[APPROVED]\n"
+                "<One paragraph citing the key evidence: what information was collected>\n\n"
+                "If rejected:\n"
+                "[REJECTED]\n"
+                "<Bulleted list of CONCRETE evidence of failure — cite missing info or error details>"
+            )
+        else:
+            review_prompt = (
+                f"You are a quality control reviewer evaluating whether a task has been completed.\n\n"
+                f"Original Goal: {goal}\n"
+                f"Proposed Plan: {plan_str}\n\n"
+                f"--- DECISION HIERARCHY (follow strictly, in priority order) ---\n\n"
+                f"  1. PRIMARY — Artifact Existence (HIGHEST PRIORITY)\n"
+                f"     If the requested files/artifacts exist on disk with appropriate content,\n"
+                f"     the goal has been achieved. This is sufficient to APPROVE.\n"
+                f"     Intermediate tool failures are IRRELEVANT if a fallback produced the artifact.\n"
+                f"     If a file is physically missing from the final disk state but is recorded in the\n"
+                f"     Evidence Store as successfully read or verified during execution (source: tool_read or tool_write),\n"
+                f"     and it was not a required final output artifact, do NOT reject the task based on that file being missing.\n\n"
+                f"  2. SECONDARY — Test / Command Results\n"
+                f"     If tests ran and passed (Exit Code 0), this CONFIRMS the artifacts are correct.\n"
+                f"     If tests ran and FAILED (non-zero exit code), this OVERRIDES artifact existence → REJECT.\n\n"
+                f"  3. TERTIARY — Tool Execution History (LOWEST PRIORITY)\n"
+                f"     Intermediate failures (e.g. a first write_file attempt that failed before a\n"
+                f"     successful fallback) are INFORMATIONAL ONLY.\n"
+                f"     A ❌ FAIL on an intermediate tool MUST NOT cause rejection if the final\n"
+                f"     artifact exists on disk. Do not penalise the use of fallback mechanisms.\n\n"
+                f"--- PRE-COMPUTED OUTCOME SIGNAL ---\n"
+                f"A deterministic classifier has already evaluated the evidence using the above\n"
+                f"hierarchy. Trust this signal strongly:\n\n"
+                f"{signal_header}\n\n"
+                f"--- FULL EVIDENCE ---\n"
+                f"{evidence_block}\n\n"
+            )
+            if evidence_store_block:
+                review_prompt += (
+                    f"--- EVIDENCE STORE (HISTORICAL EXECUTION EVIDENCE) ---\n"
+                    f"{evidence_store_block}\n\n"
+                )
+            review_prompt += (
+                "--- DECISION RULES ---\n"
+                "APPROVE if:\n"
+                "  - Outcome signal is APPROVE, OR\n"
+                "  - Requested artifacts exist on disk AND no tests failed,\n"
+                "  - OR a file is physically missing but the Evidence Store validates it was successfully read/written during tool run.\n\n"
+                "REJECT only if you have concrete evidence of failure:\n"
+                "  - Required files are explicitly confirmed MISSING from disk and have no successful read/write record in the Evidence Store, OR\n"
+                "  - A test/validation command exited with a non-zero code, OR\n"
+                "  - File content is clearly wrong or empty for the stated goal.\n\n"
+                "Do NOT reject because:\n"
+                "  - An intermediate tool attempt failed (fallback may have succeeded)\n"
+                "  - The tool history shows any ❌ markers on non-final steps\n"
+                "  - You cannot see something that wasn't required\n\n"
+                "Respond in EXACTLY this format:\n"
+                "If approved:\n"
+                "[APPROVED]\n"
+                "<One paragraph citing the key evidence: which files exist, which tests passed>\n\n"
+                "If rejected:\n"
+                "[REJECTED]\n"
+                "<Bulleted list of CONCRETE evidence of failure — cite specific paths, exit codes, or content>"
+            )
 
         messages = [
             Message(role="system", content="You are a quality control reviewer agent."),
@@ -981,26 +1086,165 @@ def make_reviewer_node(chat_service: ChatService) -> Callable[[AgentState], Any]
     return reviewer_node
 
 
+# ---------------------------------------------------------------------------
+# Helpers for the Final Response Node
+# ---------------------------------------------------------------------------
+
+_RETRIEVAL_OUTPUT_CHAR_LIMIT = 4000  # per evidence item shown to the LLM
+
+
+def _build_retrieval_evidence_block(state: AgentState) -> str:
+    """Assemble a structured block containing all retrieved content.
+
+    Draws from three sources in priority order:
+    1. ``EvidenceStore.command_outputs`` — full stdout from run_command calls.
+    2. ``EvidenceStore.tool_outputs`` — raw output from read_file / list_files.
+    3. ``EvidenceStore.file_validations`` — disk-verified file contents.
+
+    Returns an empty string when no retrieval evidence is available so that
+    callers can skip injecting the block entirely.
+    """
+    evidence_store = state.get("evidence_store")
+    if not evidence_store:
+        # Fall back to raw tool_results when EvidenceStore is absent.
+        return _build_retrieval_evidence_from_tool_results(state.get("tool_results", []))
+
+    lines: list[str] = []
+
+    # --- Command outputs (run_command stdout) ---
+    command_lines: list[str] = []
+    for co in evidence_store.command_outputs:
+        snippet = co.output[:_RETRIEVAL_OUTPUT_CHAR_LIMIT]
+        if snippet:
+            command_lines.append(f"### Command: `{co.cmd}` (exit {co.exit_code})")
+            command_lines.append("```")
+            command_lines.append(snippet)
+            command_lines.append("```")
+    if command_lines:
+        lines.append("## Command Outputs")
+        lines.extend(command_lines)
+
+    # --- Tool outputs from read_file / list_files / search_files ---
+    _RETRIEVAL_TOOL_NAMES = {"read_file", "list_files", "search_files", "search_vector_store", "run_command"}
+    tool_lines: list[str] = []
+    for to in evidence_store.tool_outputs:
+        if to.tool in _RETRIEVAL_TOOL_NAMES and to.success:
+            snippet = to.output[:_RETRIEVAL_OUTPUT_CHAR_LIMIT]
+            if snippet:
+                args_str = json.dumps(to.arguments) if isinstance(to.arguments, dict) else str(to.arguments)
+                tool_lines.append(f"### Tool: `{to.tool}` — args: `{args_str}`")
+                tool_lines.append("```")
+                tool_lines.append(snippet)
+                tool_lines.append("```")
+    if tool_lines:
+        lines.append("## File / Directory Outputs")
+        lines.extend(tool_lines)
+
+    # --- Disk-verified file contents ---
+    disk_lines: list[str] = []
+    for fv in evidence_store.file_validations:
+        if fv.exists and fv.content and fv.source in ("disk", "tool_read"):
+            snippet = fv.content[:_RETRIEVAL_OUTPUT_CHAR_LIMIT]
+            disk_lines.append(f"### File: `{fv.path}`")
+            disk_lines.append("```")
+            disk_lines.append(snippet)
+            disk_lines.append("```")
+    if disk_lines:
+        lines.append("## File Contents (disk-verified)")
+        lines.extend(disk_lines)
+
+    return "\n".join(lines)
+
+
+def _build_retrieval_evidence_from_tool_results(
+    tool_results: list[dict[str, Any]],
+) -> str:
+    """Fallback evidence builder when EvidenceStore is unavailable.
+
+    Scans raw tool_results and extracts content from successful retrieval
+    tool calls.  Less structured than the EvidenceStore path but still
+    better than returning nothing.
+    """
+    _RETRIEVAL_TOOL_NAMES = {"read_file", "list_files", "search_files", "search_vector_store", "run_command"}
+    lines: list[str] = []
+    for r in tool_results:
+        tool_name = r.get("tool", "")
+        success = r.get("success", False)
+        content = r.get("content", "")
+        if tool_name not in _RETRIEVAL_TOOL_NAMES or not success or not content:
+            continue
+        snippet = content[:_RETRIEVAL_OUTPUT_CHAR_LIMIT]
+        lines.append(f"### Tool: `{tool_name}`")
+        lines.append("```")
+        lines.append(snippet)
+        lines.append("```")
+    return "\n".join(lines)
+
+
+def _build_retrieval_fallback_response(
+    goal: str,
+    state: AgentState,
+) -> str:
+    """Construct a plain-text final response without calling the LLM.
+
+    Used when ``chat_service.provider.generate()`` raises an exception so
+    that the user always receives *something* grounded in real evidence.
+    """
+    evidence_block = _build_retrieval_evidence_block(state)
+    lines = [
+        f"# Task Result",
+        f"",
+        f"**Goal:** {goal}",
+        f"",
+    ]
+    if evidence_block:
+        lines += [
+            "## Retrieved Information",
+            "",
+            evidence_block,
+        ]
+    else:
+        lines.append("*No retrieval output was captured.*")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Final Response Node factory
+# ---------------------------------------------------------------------------
+
+
 def make_final_response_node(chat_service: ChatService) -> Callable[[AgentState], Any]:
     """Factory creating the Final Response Node.
 
     Synthesizes the plan execution and outputs a friendly markdown summary.
+
+    Behaviour is **task-type aware**:
+
+    * ``MODIFICATION`` tasks use the existing metrics-only prompt so that the
+      anti-hallucination guarantee for code-generation workflows is preserved.
+    * ``RETRIEVAL`` tasks inject the full ``EvidenceStore`` content (command
+      stdout, file contents, directory listings) so that the LLM can quote
+      the actual retrieved data in its answer.
+
+    A ``try / except`` around the LLM call ensures the node never terminates
+    silently: if ``provider.generate()`` raises, a fallback response is built
+    directly from the collected evidence without an LLM call.
     """
 
     async def final_response_node(state: AgentState) -> dict[str, Any]:
-        """
-        Final response node that compiles a grounded summary report of the run.
-        To avoid LLM hallucinations and memory dependencies, we inject structured
-        metrics directly from the verification report (or tool_results as fallback).
-        The LLM is strictly instructed to cite only these metrics.
-        """
         logger.info("[LangGraph] Final Response Node starting...")
         goal = state["goal"]
         plan = state["plan"]
         tool_results = state.get("tool_results", [])
         verification_report = state.get("verification_report")
+        task_type = state.get("task_type") or classify_task(goal)
 
-        # Extract structured metrics for grounding the LLM's final response
+        logger.info(f"[LangGraph] Final Response Node: task_type={task_type}")
+
+        # ------------------------------------------------------------------
+        # Always extract modification-focused metrics (used for MODIFICATION
+        # tasks and also embedded in RETRIEVAL responses for completeness).
+        # ------------------------------------------------------------------
         files_created: list[str] = []
         files_modified: list[str] = []
         workspace_snapshot: list[str] = []
@@ -1024,13 +1268,12 @@ def make_final_response_node(chat_service: ChatService) -> Callable[[AgentState]
                     total_skipped += cr.test_summary.get("skipped", 0)
         else:
             # Fallback extraction from tool_results
-            seen_files = set()
+            seen_files: set[str] = set()
             for r in tool_results:
                 tool_name = r.get("tool", "")
                 success = r.get("success", False)
                 arguments = r.get("arguments", {})
 
-                # Check for write_file
                 if tool_name == "write_file" and success:
                     from nakama_kun.orchestration.verification import (
                         _extract_paths_from_arguments,
@@ -1042,15 +1285,13 @@ def make_final_response_node(chat_service: ChatService) -> Callable[[AgentState]
                             seen_files.add(p)
                             files_created.append(p)
 
-                # Check for run_command test parsing fallback
                 elif tool_name == "run_command":
-                    cmd = arguments.get("cmd", "")
+                    cmd = arguments.get("cmd", "") if isinstance(arguments, dict) else ""
                     content = r.get("content", "")
                     json_content = content
                     if content.startswith("ERROR: "):
                         json_content = content[len("ERROR: "):]
 
-                    # Try to parse as JSON first
                     stdout_val = json_content
                     try:
                         data = json.loads(json_content)
@@ -1069,9 +1310,10 @@ def make_final_response_node(chat_service: ChatService) -> Callable[[AgentState]
                         total_errors += ts.get("errors", 0)
                         total_skipped += ts.get("skipped", 0)
 
-        # Build structured metrics block
+        # Build structured metrics block (used by MODIFICATION path and
+        # embedded as a supplementary section in RETRIEVAL responses).
         metrics_lines = [
-            "### STRUCTURED METRICS (TRUST AND CITE ONLY THESE METRICS)",
+            "### STRUCTURED METRICS",
             f"- Total Tool Executions: {len(tool_results)} runs",
             f"- Files Created ({len(files_created)}): {', '.join(files_created) if files_created else '(none)'}",
             f"- Files Modified ({len(files_modified)}): {', '.join(files_modified) if files_modified else '(none)'}",
@@ -1096,23 +1338,86 @@ def make_final_response_node(chat_service: ChatService) -> Callable[[AgentState]
 
         metrics_block = "\n".join(metrics_lines)
 
-        summary_prompt = (
-            f"Synthesize a final report summarizing the agent's work.\n"
-            f"User Goal: {goal}\n"
-            f"Plan Proposed: {plan.goal_summary if plan else 'None'}\n\n"
-            f"{metrics_block}\n\n"
-            f"Create a beautiful markdown summary reporting what actions were completed. "
-            f"You MUST only cite the files created/modified and test counts listed in the structured metrics block. "
-            f"Do NOT invent, infer, or hallucinate other files, outcomes, or test metrics. If the metadata shows no tests ran, report that clearly."
-        )
+        # ------------------------------------------------------------------
+        # Branch on task_type to build the appropriate prompt.
+        # ------------------------------------------------------------------
+
+        if task_type == TASK_TYPE_RETRIEVAL:
+            # ---- RETRIEVAL path ----
+            # Inject the actual retrieved evidence so the LLM can quote it.
+            evidence_block = _build_retrieval_evidence_block(state)
+
+            if evidence_block:
+                retrieval_section = (
+                    "### RETRIEVED EVIDENCE\n"
+                    "The following information was collected by the agent's tools.\n"
+                    "Cite this evidence verbatim when answering the user's question.\n\n"
+                    + evidence_block
+                )
+            else:
+                retrieval_section = (
+                    "### RETRIEVED EVIDENCE\n"
+                    "No retrieval output was captured.  Indicate that the information "
+                    "could not be obtained."
+                )
+
+            summary_prompt = (
+                f"The user asked for information.  Your job is to answer their question "
+                f"using ONLY the evidence collected by the agent's tools.\n\n"
+                f"User Goal: {goal}\n"
+                f"Plan Proposed: {plan.goal_summary if plan else 'None'}\n\n"
+                f"{retrieval_section}\n\n"
+                f"{metrics_block}\n\n"
+                f"Instructions:\n"
+                f"- Answer the user's question directly using the RETRIEVED EVIDENCE above.\n"
+                f"- Quote or paraphrase the actual tool output — do NOT invent content.\n"
+                f"- If the evidence contains a directory listing, include the filenames.\n"
+                f"- If the evidence contains file contents, quote them.\n"
+                f"- If the evidence contains a version string, include it.\n"
+                f"- Present the answer in clear markdown.\n"
+            )
+
+            logger.info("[LangGraph] Final Response Node: using RETRIEVAL prompt.")
+
+        else:
+            # ---- MODIFICATION path (unchanged behaviour) ----
+            summary_prompt = (
+                f"Synthesize a final report summarizing the agent's work.\n"
+                f"User Goal: {goal}\n"
+                f"Plan Proposed: {plan.goal_summary if plan else 'None'}\n\n"
+                f"{metrics_block}\n\n"
+                f"Create a beautiful markdown summary reporting what actions were completed. "
+                f"You MUST only cite the files created/modified and test counts listed in the structured metrics block. "
+                f"Do NOT invent, infer, or hallucinate other files, outcomes, or test metrics. "
+                f"If the metadata shows no tests ran, report that clearly."
+            )
+
+            logger.info("[LangGraph] Final Response Node: using MODIFICATION prompt.")
 
         messages = [
             Message(role="system", content="You are a helpful assistant reporting task results."),
             Message(role="user", content=summary_prompt),
         ]
 
-        response = await chat_service.provider.generate(messages)
-        content = response.content or ""
+        # ------------------------------------------------------------------
+        # LLM call with failure recovery.
+        # If the LLM raises, build a plain-text fallback from raw evidence so
+        # the user always receives the retrieved information.
+        # ------------------------------------------------------------------
+        try:
+            response = await chat_service.provider.generate(messages)
+            content = response.content or ""
+            if not content:
+                logger.warning(
+                    "[LangGraph] Final Response Node: LLM returned empty content; using fallback."
+                )
+                content = _build_retrieval_fallback_response(goal, state)
+        except Exception as exc:
+            logger.error(
+                f"[LangGraph] Final Response Node: LLM call failed ({exc}); "
+                "building fallback response from collected evidence."
+            )
+            content = _build_retrieval_fallback_response(goal, state)
 
         return {"final_response": content, "status": "done"}
 
