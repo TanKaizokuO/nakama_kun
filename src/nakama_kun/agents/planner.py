@@ -25,7 +25,7 @@ class PlannerAgent(BaseAgent):
         # 1. Retrieve codebase context (RAG) and workspace summary
         workspace_context = ""
         try:
-            workspace_context = WorkspaceContextBuilder().build_summary()
+            workspace_context = WorkspaceContextBuilder().build_summary(goal)
         except Exception as e:
             logger.warning(f"Failed to build workspace context summary: {e}")
 

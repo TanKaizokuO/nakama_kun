@@ -24,7 +24,7 @@ class PlannerService:
         from nakama_kun.rag import get_retriever
         from nakama_kun.workspace.context import WorkspaceContextBuilder
         try:
-            workspace_context = WorkspaceContextBuilder().build_summary()
+            workspace_context = WorkspaceContextBuilder().build_summary(prompt)
             full_system_prompt = f"{PLANNER_SYSTEM_PROMPT}\n\n{workspace_context}"
 
             # Retrieve matching codebase chunks for planning prompt

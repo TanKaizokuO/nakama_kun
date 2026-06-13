@@ -7,6 +7,9 @@ from nakama_kun.workspace.summary_builder import WorkspaceSummaryBuilder
 from nakama_kun.workspace.symbol_extractor import PythonSymbolExtractor
 from nakama_kun.workspace.symbol_index_service import SymbolIndexService
 from nakama_kun.workspace.planner_context import PlannerContextBuilder
+from nakama_kun.workspace.dependency_graph import DependencyGraphBuilder
+from nakama_kun.workspace.impact_analyzer import ImpactAnalyzer
+from nakama_kun.workspace.architecture_summary import ArchitectureSummaryBuilder
 
 __all__ = [
     "FileInfo",
@@ -24,4 +27,7 @@ __all__ = [
     "PythonSymbolExtractor",
     "SymbolIndexService",
     "PlannerContextBuilder",
+    "DependencyGraphBuilder",
+    "ImpactAnalyzer",
+    "ArchitectureSummaryBuilder",
 ]
