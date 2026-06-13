@@ -46,6 +46,15 @@ class WorkspaceContextBuilder:
         # Append main summary
         lines.append(summary_text)
 
+        # Append symbol summary
+        try:
+            from nakama_kun.workspace.planner_context import PlannerContextBuilder
+            symbol_summary = PlannerContextBuilder(self.workspace_root).build_symbol_summary()
+            lines.append("\n" + symbol_summary)
+        except Exception as e:
+            from loguru import logger
+            logger.warning(f"Failed to build symbol summary: {e}")
+
         # Directory structure overview (depth 2 tree visualization)
         lines.append("\n### Project Structure Overview")
         tree_lines = self._generate_structure_tree_from_snapshot(snapshot)
