@@ -126,7 +126,10 @@ class ExperienceRetriever:
             logger.warning(f"Retriever: Failed to fetch successes for frequency: {e}")
             all_successes = []
 
-        goal_counts = Counter(s.goal.lower().strip() for s in all_successes)
+        goal_freqs = {}
+        for s in all_successes:
+            g = s.goal.lower().strip()
+            goal_freqs[g] = goal_freqs.get(g, 0) + getattr(s, "success_frequency", 0) + 1
         now = datetime.now(UTC)
 
         scored_tasks = []
@@ -159,7 +162,7 @@ class ExperienceRetriever:
             recency_score = 1.0 / (1.0 + elapsed_seconds / (7.0 * 86400.0))
 
             # 3. Success Frequency
-            freq = goal_counts.get(task.goal.lower().strip(), 1)
+            freq = goal_freqs.get(task.goal.lower().strip(), 1)
             frequency_score = min(1.0, (freq - 1) / 5.0) if freq > 1 else 0.0
 
             # Combined score: 50% Similarity, 30% Recency, 20% Frequency
@@ -186,7 +189,10 @@ class ExperienceRetriever:
             logger.warning(f"Retriever: Failed to fetch failures for frequency: {e}")
             all_failures = []
 
-        goal_counts = Counter(f.goal.lower().strip() for f in all_failures)
+        goal_freqs = {}
+        for f in all_failures:
+            g = f.goal.lower().strip()
+            goal_freqs[g] = goal_freqs.get(g, 0) + getattr(f, "failure_frequency", 0) + 1
         now = datetime.now(UTC)
 
         scored_failures = []
@@ -214,7 +220,7 @@ class ExperienceRetriever:
             sim_score = 1.0 / (1.0 + dist)
             elapsed_seconds = (now - failure.timestamp).total_seconds()
             recency_score = 1.0 / (1.0 + elapsed_seconds / (7.0 * 86400.0))
-            freq = goal_counts.get(failure.goal.lower().strip(), 1)
+            freq = goal_freqs.get(failure.goal.lower().strip(), 1)
             frequency_score = min(1.0, (freq - 1) / 5.0) if freq > 1 else 0.0
 
             final_score = 0.5 * sim_score + 0.3 * recency_score + 0.2 * frequency_score

@@ -29,6 +29,15 @@ class MemoryStore:
     def get_preferences(self) -> list[UserPreference]:
         raise NotImplementedError
 
+    def increment_success_frequency(self, goal: str) -> None:
+        raise NotImplementedError
+
+    def increment_failure_frequency(self, goal: str) -> None:
+        raise NotImplementedError
+
+    def update_preference_confidence(self, key: str, confidence: float) -> None:
+        raise NotImplementedError
+
 
 class SQLiteMemoryStore(MemoryStore):
     """SQLite-backed structured store implementation for local persistence."""
@@ -65,7 +74,8 @@ class SQLiteMemoryStore(MemoryStore):
                     files_changed TEXT NOT NULL,
                     tools_used TEXT NOT NULL,
                     outcome TEXT NOT NULL,
-                    timestamp TEXT NOT NULL
+                    timestamp TEXT NOT NULL,
+                    success_frequency INTEGER DEFAULT 0
                 )
                 """
             )
@@ -78,7 +88,8 @@ class SQLiteMemoryStore(MemoryStore):
                     failure_type TEXT NOT NULL,
                     failure_message TEXT NOT NULL,
                     resolution TEXT NOT NULL,
-                    timestamp TEXT NOT NULL
+                    timestamp TEXT NOT NULL,
+                    failure_frequency INTEGER DEFAULT 0
                 )
                 """
             )
@@ -93,6 +104,18 @@ class SQLiteMemoryStore(MemoryStore):
                 )
                 """
             )
+
+            # Alter existing tables if columns don't exist
+            try:
+                conn.execute("ALTER TABLE successful_tasks ADD COLUMN success_frequency INTEGER DEFAULT 0;")
+            except sqlite3.OperationalError:
+                pass
+
+            try:
+                conn.execute("ALTER TABLE failure_records ADD COLUMN failure_frequency INTEGER DEFAULT 0;")
+            except sqlite3.OperationalError:
+                pass
+
             conn.commit()
 
     # --- Success Tasks persistence ---
@@ -105,22 +128,23 @@ class SQLiteMemoryStore(MemoryStore):
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO successful_tasks (goal, plan_summary, files_changed, tools_used, outcome, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO successful_tasks (goal, plan_summary, files_changed, tools_used, outcome, timestamp, success_frequency)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (task.goal, task.plan_summary, files_json, tools_json, task.outcome, timestamp_str),
+                (task.goal, task.plan_summary, files_json, tools_json, task.outcome, timestamp_str, task.success_frequency),
             )
             conn.commit()
 
     def get_successes(self) -> list[SuccessfulTask]:
         with self._connect() as conn:
             cursor = conn.execute(
-                "SELECT goal, plan_summary, files_changed, tools_used, outcome, timestamp FROM successful_tasks ORDER BY timestamp DESC"
+                "SELECT goal, plan_summary, files_changed, tools_used, outcome, timestamp, success_frequency FROM successful_tasks ORDER BY timestamp DESC"
             )
             rows = cursor.fetchall()
 
         successes = []
         for r in rows:
+            freq = r["success_frequency"] if "success_frequency" in r.keys() else 0
             successes.append(
                 SuccessfulTask(
                     goal=r["goal"],
@@ -129,9 +153,18 @@ class SQLiteMemoryStore(MemoryStore):
                     tools_used=json.loads(r["tools_used"]),
                     outcome=r["outcome"],
                     timestamp=datetime.fromisoformat(r["timestamp"]),
+                    success_frequency=freq,
                 )
             )
         return successes
+
+    def increment_success_frequency(self, goal: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE successful_tasks SET success_frequency = success_frequency + 1 WHERE LOWER(TRIM(goal)) = LOWER(TRIM(?))",
+                (goal,),
+            )
+            conn.commit()
 
     # --- Failure Records persistence ---
 
@@ -142,8 +175,8 @@ class SQLiteMemoryStore(MemoryStore):
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO failure_records (goal, attempted_actions, failure_type, failure_message, resolution, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO failure_records (goal, attempted_actions, failure_type, failure_message, resolution, timestamp, failure_frequency)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     failure.goal,
@@ -152,6 +185,7 @@ class SQLiteMemoryStore(MemoryStore):
                     failure.failure_message,
                     failure.resolution,
                     timestamp_str,
+                    failure.failure_frequency,
                 ),
             )
             conn.commit()
@@ -159,12 +193,13 @@ class SQLiteMemoryStore(MemoryStore):
     def get_failures(self) -> list[FailureRecord]:
         with self._connect() as conn:
             cursor = conn.execute(
-                "SELECT goal, attempted_actions, failure_type, failure_message, resolution, timestamp FROM failure_records ORDER BY timestamp DESC"
+                "SELECT goal, attempted_actions, failure_type, failure_message, resolution, timestamp, failure_frequency FROM failure_records ORDER BY timestamp DESC"
             )
             rows = cursor.fetchall()
 
         failures = []
         for r in rows:
+            freq = r["failure_frequency"] if "failure_frequency" in r.keys() else 0
             failures.append(
                 FailureRecord(
                     goal=r["goal"],
@@ -173,9 +208,18 @@ class SQLiteMemoryStore(MemoryStore):
                     failure_message=r["failure_message"],
                     resolution=r["resolution"],
                     timestamp=datetime.fromisoformat(r["timestamp"]),
+                    failure_frequency=freq,
                 )
             )
         return failures
+
+    def increment_failure_frequency(self, goal: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE failure_records SET failure_frequency = failure_frequency + 1 WHERE LOWER(TRIM(goal)) = LOWER(TRIM(?))",
+                (goal,),
+            )
+            conn.commit()
 
     # --- User Preferences persistence ---
 
@@ -222,3 +266,12 @@ class SQLiteMemoryStore(MemoryStore):
                 )
             )
         return preferences
+
+    def update_preference_confidence(self, key: str, confidence: float) -> None:
+        timestamp_str = datetime.now().isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE user_preferences SET confidence = ?, updated_at = ? WHERE key = ?",
+                (confidence, timestamp_str, key),
+            )
+            conn.commit()

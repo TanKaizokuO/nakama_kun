@@ -9,6 +9,8 @@ from nakama_kun.memory.sqlite_store import MemoryStore, SQLiteMemoryStore
 from nakama_kun.memory.manager import MemoryManager
 from nakama_kun.memory.retriever import ExperienceBundle, ExperienceRetriever
 from nakama_kun.memory.indexer import MemoryIndexer
+from nakama_kun.memory.experience_planner import ExperienceAwarePlanner, MemoryInsights
+from nakama_kun.memory.feedback import MemoryFeedbackService
 
 
 def get_memory_repository() -> MemoryRepository:
@@ -37,5 +39,8 @@ __all__ = [
     "ExperienceBundle",
     "ExperienceRetriever",
     "MemoryIndexer",
+    "ExperienceAwarePlanner",
+    "MemoryInsights",
+    "MemoryFeedbackService",
 ]
 

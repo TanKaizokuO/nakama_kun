@@ -13,6 +13,7 @@ class SuccessfulTask(BaseModel):
     tools_used: list[str] = Field(default_factory=list, description="List of tools invoked.")
     outcome: str = Field(description="Outcome explanation or final response snippet.")
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC), description="Time of completion.")
+    success_frequency: int = Field(default=0, description="The cumulative number of times this success was referenced.")
 
 
 class FailureRecord(BaseModel):
@@ -24,6 +25,8 @@ class FailureRecord(BaseModel):
     failure_message: str = Field(description="Rejection feedback or compile/test error message.")
     resolution: str = Field(description="Determined route or planned correction.")
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC), description="Time of failure.")
+    failure_frequency: int = Field(default=0, description="The cumulative number of times this failure occurred/was referenced.")
+
 
 
 class UserPreference(BaseModel):

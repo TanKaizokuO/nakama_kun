@@ -16,7 +16,9 @@ class MemoryManager:
         self.store = store
         self.workspace_root = Path(workspace_root) if workspace_root else None
         from nakama_kun.memory.indexer import MemoryIndexer
+        from nakama_kun.memory.feedback import MemoryFeedbackService
         self.indexer = MemoryIndexer(self.store, workspace_root=self.workspace_root)
+        self.feedback_service = MemoryFeedbackService(self.store)
 
     def save_successful_task(
         self,
@@ -49,8 +51,16 @@ class MemoryManager:
             self.store.save_success(task)
             logger.info("MemoryManager: Saved successful task.")
             self.indexer.index_success(task)
+            
+            # Trigger feedback loop updates
             from nakama_kun.memory.retriever import ExperienceRetriever
             ExperienceRetriever.clear_cache()
+            
+            retriever = ExperienceRetriever(self.store, workspace_root=self.workspace_root)
+            bundle = retriever.retrieve_experience(goal)
+            self.feedback_service.update_from_bundle(goal, bundle)
+            # Also record usage of this specific goal itself
+            self.feedback_service.record_success_usage(goal)
         except Exception as e:
             logger.error(f"MemoryManager: Failed to save successful task: {e}")
 
@@ -88,8 +98,16 @@ class MemoryManager:
             self.store.save_failure(failure)
             logger.info("MemoryManager: Saved failure record.")
             self.indexer.index_failure(failure)
+            
+            # Trigger feedback loop updates
             from nakama_kun.memory.retriever import ExperienceRetriever
             ExperienceRetriever.clear_cache()
+            
+            retriever = ExperienceRetriever(self.store, workspace_root=self.workspace_root)
+            bundle = retriever.retrieve_experience(goal)
+            self.feedback_service.update_from_bundle(goal, bundle)
+            # Also record usage of this specific failure goal
+            self.feedback_service.record_failure_usage(goal)
         except Exception as e:
             logger.error(f"MemoryManager: Failed to save failure record: {e}")
 

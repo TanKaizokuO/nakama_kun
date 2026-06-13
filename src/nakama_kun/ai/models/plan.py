@@ -4,6 +4,9 @@ import re
 from pydantic import BaseModel, Field
 
 
+from nakama_kun.memory.experience_planner import MemoryInsights
+
+
 class Plan(BaseModel):
     """Structured implementation plan model."""
 
@@ -14,6 +17,7 @@ class Plan(BaseModel):
     risks: list[str] = Field(default_factory=list, description="Potential risks or pitfalls.")
     validation_checklist: list[str] = Field(default_factory=list, description="A checklist of items to verify completion.")
     targets: list[str] = Field(default_factory=list, description="Optional target files or modules involved.")
+    memory_insights: MemoryInsights | None = Field(default=None, description="Explainability metadata from long-term memory.")
 
 
 def parse_plan(text: str) -> Plan | None:

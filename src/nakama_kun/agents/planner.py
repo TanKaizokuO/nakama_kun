@@ -39,17 +39,22 @@ class PlannerAgent(BaseAgent):
 
         # Retrieve past experiences semantically
         experience_context = ""
+        hints = []
+        bundle = None
         try:
             from nakama_kun.config.memory import MemorySettings
             from nakama_kun.memory.sqlite_store import SQLiteMemoryStore
             from nakama_kun.memory.retriever import ExperienceRetriever
+            from nakama_kun.memory.experience_planner import ExperienceAwarePlanner
 
             settings = MemorySettings()
             if settings.memory_enabled:
                 store = SQLiteMemoryStore(settings.memory_db_path)
                 experience_retriever = ExperienceRetriever(store, workspace_root=state.get("workspace_root"))
                 bundle = experience_retriever.retrieve_experience(goal)
-                experience_context = bundle.format_as_markdown()
+                exp_planner = ExperienceAwarePlanner()
+                experience_context = exp_planner.build_prompt_section(bundle)
+                hints = exp_planner.build_failure_prevention_hints(bundle)
         except Exception as e:
             logger.warning(f"Failed to retrieve experience context: {e}")
 
@@ -61,6 +66,9 @@ class PlannerAgent(BaseAgent):
             system_prompt += f"\n\n### Retrieved Codebase Context\n{rag_context}"
         if experience_context:
             system_prompt += f"\n\n### Past Experiences\n{experience_context}"
+        if hints:
+            hints_block = "\n".join(f"* {h}" for h in hints)
+            system_prompt += f"\n\n### Failure Prevention Guidance\n{hints_block}"
 
         # 2. Build user prompt/refinement context
         if feedback:
@@ -108,6 +116,13 @@ class PlannerAgent(BaseAgent):
 
         # 4. Parse Plan
         plan = parse_plan(raw_text)
+        if plan and bundle is not None:
+            try:
+                from nakama_kun.memory.experience_planner import ExperienceAwarePlanner
+                exp_planner = ExperienceAwarePlanner()
+                plan.memory_insights = exp_planner.build_memory_insights(bundle)
+            except Exception as e:
+                logger.warning(f"Failed to attach memory insights to plan: {e}")
 
         # 5. Log decisions and append history
         thought = f"Decomposed goal. Success: {plan is not None}."
