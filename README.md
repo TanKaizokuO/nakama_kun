@@ -33,6 +33,8 @@
 *   🔒 **Retrieval Safety Guard**: Intelligently locks workspace mutations when executing pure search or retrieval tasks, ensuring zero unintended file modifications or environment writes.
 *   🔍 **Immutable Evidence Store**: Collects read segments, written contents, command outputs, and directory trees, ensuring the final output is grounded strictly in evidence to eradicate hallucinations.
 *   ⚡ **Early-Stop Execution**: Evaluates goal satisfaction after every single tool call. If the target condition is met, it halts immediately, bypassing costly nodes to minimize API overhead.
+*   🔍 **Workspace Understanding**: Automatically scans repository structures, extracts code symbols (classes, functions, methods, imports) via AST parsing, models dependencies using directed graphs, and runs change impact analysis.
+*   🧠 **Long-Term Memory**: Semantically indexes goals, failures, resolutions, and preferences using SQLite and ChromaDB. It retrieves past experiences to drive planning, guide failure prevention, and enforce custom formatting/testing rules.
 *   📱 **Multi-Channel Interface**: Operates in your terminal (via a beautiful interactive Typer/Rich UI) or remotely via Telegram Bot integration.
 
 ---
@@ -194,6 +196,58 @@ nakama_kun/
 
 ---
 
+## 🔍 Workspace Understanding
+
+Nakama-kun integrates a comprehensive understanding layer that analyzes codebase architecture, syntax structures, and dependencies statically before planning or executing tasks.
+
+### 1. Code Intelligence & AST Symbol Indexing
+- **AST Parsing**: Leverages a pythonic AST extraction system (`PythonSymbolExtractor`) to parse classes, methods, functions, and import statements from Python files.
+- **Symbol Index**: Maintains `.workspace/symbol_index.json` containing class and function locations (file, start/end lines, parents).
+- **APIs**: The `SymbolIndexService` provides APIs to locate definitions across the workspace:
+  - `find_symbol(name)`
+  - `find_symbols_by_type(type)`
+  - `find_symbols_in_file(path)`
+- **Auto-invalidation**: Monitors file modifications and invalidates/rebuilds the cached index dynamically when files change.
+
+### 2. Dependency Graph & Impact Analysis
+- **Graph Modeling**: Builds a directed dependency network using **NetworkX**, saved to `.workspace/dependency_graph.json`. It maps files, classes, and functions as nodes, linking them with edges representing imports, ownership, references, and method calls.
+- **Impact Analyzer**: The `ImpactAnalyzer` detects potential cascading effects before any modification:
+  - Identifies direct dependencies and dependents.
+  - Recursively checks downstream impact for a file or a specific symbol (`analyze_change_impact(target)`).
+- **Architecture Outlining**: The `ArchitectureSummaryBuilder` compiles a high-level overview (`architecture_summary.md`), identifying:
+  - Project Type & Entrypoints.
+  - Core components and their relationships.
+  - Active workspace tools and flow paths.
+- **Prompt Injection**: The `PlannerContextBuilder` injects relevant symbol locations, module ownership, and potential impact vectors directly into the Planner agent's context.
+
+---
+
+## 🧠 Long-Term Memory & Semantic Experience Retrieval
+
+Instead of operating in isolation per session, Nakama-kun remembers successful runs, tool behaviors, developer choices, and failures. It leverages this context to plan smarter and avoid historical mistakes.
+
+### 1. SQLite Experience Store
+The agent logs structured execution events into a persistent SQLite database (`nakama_memory.db`):
+- **Successful Tasks**: Stores goal descriptions, files modified, tool chains used, and successful outcomes.
+- **Failure Records**: Logs failed goals, attempted actions, exception/error details, and the final successful resolutions.
+- **User Preferences**: Automatically learns preferred coding tools, formatter preferences, framework variants, and coding guidelines from execution patterns.
+
+### 2. ChromaDB Semantic Search
+- **Embedding Search**: Uses vector embeddings to semantically index goals, outcomes, and failure resolutions in a local ChromaDB database.
+- **Ranked Retrieval**: The `ExperienceRetriever` retrieves similar past experiences using a ranking algorithm that combines:
+  - Semantic similarity (cosine distance of goal embeddings).
+  - Recency decay (giving priority to recent tasks).
+  - Success and failure frequency weights.
+
+### 3. Experience-Driven Planning
+During the Planning phase, the retrieved `ExperienceBundle` is formatted and injected into the prompt:
+- **Reusing Successes**: Recommends file paths and tools that successfully solved similar goals.
+- **Proactive Failure Prevention**: Translates historical errors (e.g., `ModuleNotFoundError`) into specific instructions (e.g., *"Verify import paths and PYTHONPATH configuration"*).
+- **Enforcing Preferences**: Applies learned user choices (e.g. typing styles, formatter options, testing framework tools) with confidence tracking.
+- **Feedback Loop**: When a task concludes, the `MemoryFeedbackService` updates database statistics, increments success/failure frequencies of similar tasks, and adjusts user preference confidence scores (capped at `1.0`).
+
+---
+
 ## 🛡️ Verification, Safety & Robustness
 
 ### 1. Retrieval Safety Guard
@@ -225,6 +279,8 @@ Instead of exploring endlessly after the goal is already met:
 - [x] **Phase 8: Retrieval Guardrails & Early Termination** (Enforcing mutation blocks, early stop, and review separation).
 - [ ] **Phase 9: Multi-Agent Architectures** (Specialized coder/tester/retrieval workflows operating concurrently).
 - [ ] **Phase 10: Model Context Protocol (MCP) Support** (Enabling external tools and workspace integrations).
+- [x] **Phase 11: Workspace Understanding** (AST symbol parsing, indexing, dependency graphs, and change impact analysis).
+- [x] **Phase 12: Long-Term Memory & Experience-Driven Planning** (Structured SQLite & ChromaDB semantic indexing, ranked retrieval, failure prevention, preference learning, and feedback loops).
 
 ---
 
