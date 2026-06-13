@@ -1,11 +1,16 @@
-import pytest
-import json
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from nakama_kun.ai.models.plan import Plan
+from nakama_kun.ai.models.response import AIResponse
 from nakama_kun.orchestration.nodes import make_final_response_node
 from nakama_kun.orchestration.state import AgentState
-from nakama_kun.orchestration.verification import VerificationReport, FileArtifact, CommandResult
-from nakama_kun.ai.models.response import AIResponse
-from nakama_kun.ai.models.plan import Plan
+from nakama_kun.orchestration.verification import (
+    CommandResult,
+    FileArtifact,
+    VerificationReport,
+)
 
 
 @pytest.mark.anyio

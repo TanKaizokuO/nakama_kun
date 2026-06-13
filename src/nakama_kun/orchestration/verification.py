@@ -158,7 +158,7 @@ class VerificationReport:
         command_results: list[CommandResult],
         workspace_snapshot: list[str],
         summary: str,
-        required_artifacts: list[str] = None,
+        required_artifacts: list[str] | None = None,
     ) -> None:
         self.files_created = files_created
         self.files_modified = files_modified

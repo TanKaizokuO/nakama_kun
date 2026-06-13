@@ -22,7 +22,14 @@ from __future__ import annotations
 
 import typer
 
-from nakama_kun.cli.commands import explain_command, memory_app, wakeup_command
+from nakama_kun.cli.commands import (
+    explain_command,
+    mcp_app,
+    memory_app,
+    rag_app,
+    wakeup_command,
+    web_command,
+)
 
 # ---------------------------------------------------------------------------
 # Typer application
@@ -68,6 +75,12 @@ app.command(
 )(explain_command)
 
 app.add_typer(memory_app, name="memory")
+app.add_typer(rag_app, name="rag")
+app.add_typer(mcp_app, name="mcp")
+app.command(
+    name="web",
+    help="Launch the browser-based graphical web interface.",
+)(web_command)
 
 # ---------------------------------------------------------------------------
 # Phase 3+ extension points — uncomment as phases are implemented:

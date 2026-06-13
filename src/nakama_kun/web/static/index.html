@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nakama-kun Dashboard</title>
+  <!-- Google Fonts: Outfit and Fira Code -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="dark-theme">
+
+  <!-- Main Grid Layout -->
+  <div class="app-container">
+    
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">
+          <span class="logo-emoji">🤖</span>
+          <span class="logo-text">nakama_kun</span>
+        </div>
+        <div class="version-tag">v0.4.0</div>
+      </div>
+      
+      <nav class="nav-menu">
+        <button class="nav-item active" data-tab="agent-console">
+          <span class="nav-icon">💬</span>
+          <span class="nav-label">Agent Console</span>
+        </button>
+        <button class="nav-item" data-tab="workspace">
+          <span class="nav-icon">📁</span>
+          <span class="nav-label">Workspace</span>
+        </button>
+        <button class="nav-item" data-tab="memory">
+          <span class="nav-icon">🧠</span>
+          <span class="nav-label">Memory Viewer</span>
+        </button>
+        <button class="nav-item" data-tab="rag-mcp">
+          <span class="nav-icon">⚙️</span>
+          <span class="nav-label">RAG & MCP</span>
+        </button>
+      </nav>
+      
+      <div class="sidebar-footer">
+        <div class="status-indicator">
+          <span class="pulse-dot"></span>
+          <span class="status-text">Connected to API</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      
+      <!-- Tab 1: Agent Console -->
+      <section id="agent-console" class="tab-panel active">
+        <div class="panel-header">
+          <h1>Agent Console</h1>
+          <div class="mode-selector-wrapper">
+            <span class="selector-label">Active Mode:</span>
+            <div class="mode-pill-container">
+              <button class="mode-pill active" data-mode="ask">Ask</button>
+              <button class="mode-pill" data-mode="plan">Plan</button>
+              <button class="mode-pill" data-mode="agent">Agent</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="console-grid">
+          <!-- Chat History -->
+          <div class="chat-container card">
+            <div class="chat-messages" id="chat-messages-container">
+              <!-- Welcome message -->
+              <div class="message system">
+                <div class="msg-avatar">🤖</div>
+                <div class="msg-bubble">
+                  <p>Welcome! I am <strong>nakama_kun</strong>, your autonomous terminal assistant.</p>
+                  <p>Choose a mode above to get started:</p>
+                  <ul>
+                    <li><strong>Ask Mode</strong>: Standard model questions (RAG included).</li>
+                    <li><strong>Plan Mode</strong>: Deep implementation planning.</li>
+                    <li><strong>Agent Mode</strong>: Execution with file operations and tool access.</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Live Agent Timeline Workflow -->
+            <div class="agent-workflow-bar" id="agent-workflow-bar" style="display: none;">
+              <div class="wf-step" id="step-planning">
+                <div class="step-dot"></div>
+                <div class="step-label">Planning</div>
+              </div>
+              <div class="wf-connector"></div>
+              <div class="wf-step" id="step-coding">
+                <div class="step-dot"></div>
+                <div class="step-label">Coding</div>
+              </div>
+              <div class="wf-connector"></div>
+              <div class="wf-step" id="step-executing">
+                <div class="step-dot"></div>
+                <div class="step-label">Executing</div>
+              </div>
+              <div class="wf-connector"></div>
+              <div class="wf-step" id="step-reviewing">
+                <div class="step-dot"></div>
+                <div class="step-label">Reviewing</div>
+              </div>
+            </div>
+
+            <!-- Input area -->
+            <div class="input-area">
+              <textarea id="prompt-input" placeholder="Type your instruction here..." rows="2"></textarea>
+              <button id="send-btn" class="glow-button">
+                <span>Send</span>
+                <span class="send-icon">🚀</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Live Agent Logs (Visible in Agent Mode) -->
+          <div class="logs-sidebar card" id="logs-sidebar-wrapper" style="display: none;">
+            <div class="sidebar-header-sm">
+              <h3>Agent Steps & Logs</h3>
+              <button class="clear-logs-btn" id="clear-logs-btn">Clear</button>
+            </div>
+            <div class="logs-container" id="agent-logs-container">
+              <div class="log-entry system">Ready to launch workflow.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tab 2: Workspace Explorer -->
+      <section id="workspace" class="tab-panel">
+        <div class="panel-header">
+          <h1>Workspace Explorer</h1>
+          <div class="workspace-info">
+            <span class="info-label">Root:</span>
+            <code id="workspace-root-path">/workspace</code>
+          </div>
+        </div>
+        
+        <div class="workspace-grid">
+          <!-- Files Tree -->
+          <div class="files-sidebar card">
+            <div class="sidebar-header-sm">
+              <h3>Files</h3>
+              <button class="refresh-files-btn" id="refresh-files-btn">🔄</button>
+            </div>
+            <div class="files-tree" id="files-tree-container">
+              <!-- Dynamically populated -->
+              <div class="loading-spinner">Scanning files...</div>
+            </div>
+          </div>
+
+          <!-- File View -->
+          <div class="file-viewer card">
+            <div class="viewer-header">
+              <span id="active-file-title" class="file-title">No file selected</span>
+              <span id="file-size-badge" class="badge" style="display: none;">0 bytes</span>
+            </div>
+            <div class="code-container">
+              <pre><code id="code-content" class="language-code">Select a file from the sidebar explorer to view its contents.</code></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tab 3: Memory Viewer -->
+      <section id="memory" class="tab-panel">
+        <div class="panel-header">
+          <h1>Memory database Viewer</h1>
+        </div>
+
+        <div class="memory-grid">
+          <!-- Conversations & Tasks Lists -->
+          <div class="memory-sidebar card">
+            <div class="mem-tabs">
+              <button class="mem-tab active" data-mem="conversations">Conversations</button>
+              <button class="mem-tab" data-mem="tasks">Tasks Tracker</button>
+            </div>
+            <div class="memory-list" id="memory-list-container">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+
+          <!-- Memory Detail -->
+          <div class="memory-viewer-detail card">
+            <div class="viewer-header">
+              <h3 id="memory-detail-title">Select an item</h3>
+            </div>
+            <div class="memory-detail-content" id="memory-detail-content">
+              Select a past conversation or task to review the history.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tab 4: RAG & MCP Settings -->
+      <section id="rag-mcp" class="tab-panel">
+        <div class="panel-header">
+          <h1>RAG & MCP Controls</h1>
+        </div>
+
+        <div class="config-grid">
+          <!-- RAG Box -->
+          <div class="config-card card">
+            <div class="config-card-header">
+              <span class="icon">🔍</span>
+              <h2>RAG Vector Index</h2>
+            </div>
+            <div class="config-body">
+              <div class="info-row">
+                <span class="info-lbl">Status:</span>
+                <span class="badge success" id="rag-status-badge">Checking...</span>
+              </div>
+              <div class="info-row">
+                <span class="info-lbl">Database Path:</span>
+                <code id="rag-db-path">N/A</code>
+              </div>
+              
+              <div class="config-actions">
+                <button class="action-btn" id="rag-refresh-btn">Incremental Refresh</button>
+                <button class="action-btn warning" id="rag-build-btn">Build Clean Index</button>
+                <button class="action-btn danger" id="rag-clear-btn">Clear database</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- MCP Box -->
+          <div class="config-card card">
+            <div class="config-card-header">
+              <span class="icon">🔌</span>
+              <h2>Model Context Protocol (MCP)</h2>
+            </div>
+            <div class="config-body">
+              <div class="info-row">
+                <span class="info-lbl">Servers:</span>
+                <span id="mcp-servers-count">0 registered</span>
+              </div>
+              <div class="mcp-servers-list" id="mcp-servers-list">
+                <!-- Dynamically populated -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Safety Approval Dialog Modal -->
+  <dialog id="approval-dialog" class="approval-modal">
+    <div class="modal-header">
+      <h2>⚠️ Proposal Approval Checkpoint</h2>
+      <span class="proposal-badge" id="modal-proposal-badge">UPDATE</span>
+    </div>
+    <div class="modal-body">
+      <p>The agent is proposing the following change on <strong id="modal-file-path">file.txt</strong>:</p>
+      
+      <!-- Diff content panel -->
+      <div class="diff-panel">
+        <pre><code id="modal-diff-content" class="language-diff">No diff content</code></pre>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="modal-btn reject" id="modal-reject-btn">Reject Change</button>
+      <button class="modal-btn approve" id="modal-approve-btn">Approve & Apply</button>
+    </div>
+  </dialog>
+
+  <!-- Notification Toast Container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- Main JavaScript App -->
+  <script src="app.js"></script>
+</body>
+</html>

@@ -8,6 +8,7 @@ from loguru import logger
 from nakama_kun.ai.services.chat_service import ChatService
 from nakama_kun.ai.services.planner_service import PlannerService
 from nakama_kun.orchestration.nodes import (
+    make_coder_node,
     make_executor_node,
     make_final_response_node,
     make_planner_node,
@@ -35,10 +36,14 @@ def route_after_review(state: AgentState) -> str:
         )
         return "final_response"
 
+    route = state.get("reviewer_route") or "planner"
+    if route not in ("planner", "coder"):
+        route = "planner"
+
     logger.info(
-        f"[LangGraph] QA rejected. Routing back to Planner Node (Retry {retry_count + 1}/3)."
+        f"[LangGraph] QA rejected. Routing back to {route.capitalize()} Node (Retry {retry_count + 1}/3)."
     )
-    return "planner"
+    return route
 
 
 def build_agent_graph(
@@ -53,6 +58,7 @@ def build_agent_graph(
 
     # 1. Create nodes
     planner_node: Any = make_planner_node(planner_service)
+    coder_node: Any = make_coder_node(chat_service)
     executor_node: Any = make_executor_node(chat_service, tool_registry, tool_router)
     verifier_node: Any = make_verifier_node(workspace_root)
     reviewer_node: Any = make_reviewer_node(chat_service)
@@ -60,6 +66,7 @@ def build_agent_graph(
 
     # 2. Add nodes to graph
     workflow.add_node("planner", planner_node)
+    workflow.add_node("coder", coder_node)
     workflow.add_node("executor", executor_node)
     workflow.add_node("verifier", verifier_node)
     workflow.add_node("reviewer", reviewer_node)
@@ -67,7 +74,8 @@ def build_agent_graph(
 
     # 3. Define transitions / edges
     workflow.add_edge(START, "planner")
-    workflow.add_edge("planner", "executor")
+    workflow.add_edge("planner", "coder")
+    workflow.add_edge("coder", "executor")
     # Verifier inspects the real workspace before the Reviewer evaluates results
     workflow.add_edge("executor", "verifier")
     workflow.add_edge("verifier", "reviewer")
@@ -78,6 +86,7 @@ def build_agent_graph(
         route_after_review,
         {
             "planner": "planner",
+            "coder": "coder",
             "final_response": "final_response",
         },
     )

@@ -1,14 +1,16 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock
-from nakama_kun.orchestration.nodes import make_planner_node
-from nakama_kun.orchestration.state import AgentState
+
+import pytest
+
 from nakama_kun.ai.models.plan import Plan
 from nakama_kun.ai.services.planner_service import PlannerService
+from nakama_kun.orchestration.nodes import make_planner_node
+from nakama_kun.orchestration.state import AgentState
 from nakama_kun.orchestration.verification import (
-    VerificationReport,
-    FileArtifact,
-    ExistenceCheck,
     CommandResult,
+    ExistenceCheck,
+    FileArtifact,
+    VerificationReport,
 )
 
 

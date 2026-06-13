@@ -24,6 +24,8 @@ Phase 3+ extension points
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from rich.console import Console
 
 from nakama_kun.core.constants import NavSignal
@@ -32,6 +34,9 @@ from nakama_kun.modes.ask_mode import AskMode
 from nakama_kun.modes.base import BaseMode
 from nakama_kun.modes.plan_mode import PlanMode
 from nakama_kun.ui.menus import _MENU_STYLE, CLIMenuChoice, show_cli_menu
+
+if TYPE_CHECKING:
+    from nakama_kun.voice.voice_mode import VoiceMode
 
 console = Console()
 
@@ -47,11 +52,29 @@ class CLIMode(BaseMode):
     name: str = "CLI Mode"
 
     def __init__(
-        self, agent_mode: AgentMode, plan_mode: PlanMode, ask_mode: AskMode
+        self,
+        agent_mode: AgentMode,
+        plan_mode: PlanMode,
+        ask_mode: AskMode,
+        voice_mode: VoiceMode | None = None,
     ) -> None:
         self._agent = agent_mode
         self._plan = plan_mode
         self._ask = ask_mode
+        self._voice = voice_mode
+
+    @property
+    def voice(self) -> VoiceMode:
+        """Lazily initialize VoiceMode to prevent startup dependency errors."""
+        if self._voice is None:
+            from nakama_kun.voice.voice_mode import VoiceMode
+            self._voice = VoiceMode(
+                chat_service=self._ask._chat_service,
+                agent_mode=self._agent,
+                plan_mode=self._plan,
+                ask_mode=self._ask,
+            )
+        return self._voice
 
     def run(self) -> NavSignal:
         """
@@ -102,6 +125,9 @@ class CLIMode(BaseMode):
 
             case CLIMenuChoice.ASK:
                 return self._ask.run()
+
+            case CLIMenuChoice.VOICE:
+                return self.voice.run()
 
             case CLIMenuChoice.EXPLAIN:
                 from rich.markdown import Markdown

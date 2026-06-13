@@ -14,7 +14,6 @@ Covers:
 from __future__ import annotations
 
 import os
-import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -28,14 +27,12 @@ from nakama_kun.orchestration.verification import (
     CommandResult,
     ExistenceCheck,
     FileArtifact,
-    OutcomeSignal,
     VerificationLayer,
     VerificationReport,
     _extract_path_from_write_output,
     _extract_paths_from_arguments,
     _snapshot_workspace,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -819,7 +816,7 @@ async def test_reviewer_prompt_hierarchy_ordering(
     )
 
 
-def test_verification_layer_pytest_parsing(tmp_path: Any) -> None:
+def test_verification_layer_pytest_parsing(tmp_path: Path) -> None:
     """Verify VerificationLayer parses pytest results in run_command outputs."""
     layer = VerificationLayer(str(tmp_path))
     
@@ -861,7 +858,7 @@ test_calculator.py ..F..                                                  [100%]
     assert cr.success is False
 
 
-def test_verification_layer_unittest_parsing(tmp_path: Any) -> None:
+def test_verification_layer_unittest_parsing(tmp_path: Path) -> None:
     """Verify VerificationLayer parses unittest results in run_command outputs."""
     layer = VerificationLayer(str(tmp_path))
     
@@ -902,7 +899,7 @@ OK (skipped=2)
     assert cr.success is True
 
 
-def test_verification_layer_failed_test_triggers_rejection(tmp_path: Any) -> None:
+def test_verification_layer_failed_test_triggers_rejection(tmp_path: Path) -> None:
     """Verify failed tests in command results lead to a REJECT recommendation."""
     layer = VerificationLayer(str(tmp_path))
     

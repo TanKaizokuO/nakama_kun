@@ -1,16 +1,18 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock
-from nakama_kun.orchestration.nodes import make_verifier_node, make_reviewer_node
-from nakama_kun.orchestration.state import AgentState
-from nakama_kun.orchestration.evidence import build_evidence_store, EvidenceStore
-from nakama_kun.orchestration.verification import (
-    VerificationReport,
-    FileArtifact,
-    ExistenceCheck,
-    CommandResult,
-)
+
+import pytest
+
 from nakama_kun.ai.models.plan import Plan
 from nakama_kun.ai.models.response import AIResponse
+from nakama_kun.orchestration.evidence import EvidenceStore, build_evidence_store
+from nakama_kun.orchestration.nodes import make_reviewer_node, make_verifier_node
+from nakama_kun.orchestration.state import AgentState
+from nakama_kun.orchestration.verification import (
+    CommandResult,
+    ExistenceCheck,
+    FileArtifact,
+    VerificationReport,
+)
 
 
 def test_evidence_store_basic_build() -> None:

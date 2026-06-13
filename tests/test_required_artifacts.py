@@ -22,7 +22,6 @@ Covers:
 
 from __future__ import annotations
 
-import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -32,26 +31,23 @@ from nakama_kun.ai.models.message import Message, ToolCall
 from nakama_kun.ai.models.plan import Plan
 from nakama_kun.ai.models.response import AIResponse, TokenUsage
 from nakama_kun.orchestration.nodes import (
-    EXPLORATION_TOOLS,
     RESEARCH_THRESHOLD,
     _action_signature,
     _build_retry_memory,
     _delivery_guidance,
     _empty_retry_memory,
     _missing_required_artifacts,
-    _normalize_tool_arguments,
     _paths_match,
     _prioritize_tool_schemas,
     make_executor_node,
+    make_planner_node,
     make_reviewer_node,
     make_verifier_node,
-    make_planner_node,
 )
 from nakama_kun.orchestration.state import AgentState
 from nakama_kun.tools.interfaces import ToolResult
 from nakama_kun.tools.registry import ToolRegistry
 from nakama_kun.tools.router import ToolRouter
-
 
 # ---------------------------------------------------------------------------
 # Helpers

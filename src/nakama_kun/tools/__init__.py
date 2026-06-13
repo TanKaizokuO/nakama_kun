@@ -16,6 +16,7 @@ from nakama_kun.tools.core import (
     ReadFileTool,
     RunCommandTool,
     SearchFilesTool,
+    SearchVectorStoreTool,
     WriteFileTool,
 )
 from nakama_kun.tools.exceptions import (
@@ -34,6 +35,7 @@ def build_default_registry(
     workspace_root: str | None = None,
     safety_manager: Any = None,
     approval_provider: Any = None,
+    mcp_tools: list[BaseTool] | None = None,
 ) -> ToolRegistry:
     """Create a :class:`ToolRegistry` loaded with all core workspace tools.
 
@@ -42,6 +44,7 @@ def build_default_registry(
             ``os.getcwd()`` if not provided.
         safety_manager: SafetyManager to proposal checks.
         approval_provider: ApprovalProvider to request user confirms.
+        mcp_tools: Optional list of MCP tools to register.
 
     Returns:
         A fully-populated :class:`ToolRegistry`.
@@ -56,7 +59,11 @@ def build_default_registry(
     )
     registry.register(ListFilesTool(root))
     registry.register(SearchFilesTool(root))
+    registry.register(SearchVectorStoreTool(root))
     registry.register(RunCommandTool(cwd=root))
+    if mcp_tools:
+        for tool in mcp_tools:
+            registry.register(tool)
     return registry
 
 
@@ -73,6 +80,7 @@ __all__ = [
     "WriteFileTool",
     "ListFilesTool",
     "SearchFilesTool",
+    "SearchVectorStoreTool",
     "RunCommandTool",
     # exceptions
     "ToolError",

@@ -21,10 +21,18 @@ class PlannerService:
         Maintains history of previous queries and answers in this planning session.
         Returns a tuple of (parsed Plan object or None, raw response text).
         """
+        from nakama_kun.rag import get_retriever
         from nakama_kun.workspace.context import WorkspaceContextBuilder
         try:
             workspace_context = WorkspaceContextBuilder().build_summary()
             full_system_prompt = f"{PLANNER_SYSTEM_PROMPT}\n\n{workspace_context}"
+
+            # Retrieve matching codebase chunks for planning prompt
+            retriever = get_retriever()
+            if retriever is not None:
+                rag_context = retriever.retrieve_formatted_context(prompt)
+                if rag_context:
+                    full_system_prompt += f"\n\n{rag_context}"
         except Exception:
             full_system_prompt = PLANNER_SYSTEM_PROMPT
 

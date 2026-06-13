@@ -89,10 +89,20 @@ class AskMode(BaseMode):
 
                 # Update system prompt with fresh workspace context
                 from nakama_kun.ai.prompts.system_prompt import ASK_SYSTEM_PROMPT
+                from nakama_kun.rag import get_retriever
                 from nakama_kun.workspace.context import WorkspaceContextBuilder
                 try:
                     workspace_context = WorkspaceContextBuilder().build_summary()
-                    self._chat_service.system_prompt = f"{ASK_SYSTEM_PROMPT}\n\n{workspace_context}"
+                    system_prompt = f"{ASK_SYSTEM_PROMPT}\n\n{workspace_context}"
+
+                    # Retrieve matching codebase chunks
+                    retriever = get_retriever()
+                    if retriever is not None:
+                        rag_context = retriever.retrieve_formatted_context(user_msg)
+                        if rag_context:
+                            system_prompt += f"\n\n{rag_context}"
+
+                    self._chat_service.system_prompt = system_prompt
                 except Exception:
                     self._chat_service.system_prompt = ASK_SYSTEM_PROMPT
 

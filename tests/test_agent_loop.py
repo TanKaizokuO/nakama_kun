@@ -285,9 +285,9 @@ class TestExecuteToolCall:
 
 
 class TestBuildDefaultRegistry:
-    def test_has_five_tools(self, tmp_path: object) -> None:
+    def test_has_six_tools(self, tmp_path: object) -> None:
         registry = build_default_registry(str(tmp_path))
-        assert len(registry) == 5
+        assert len(registry) == 6
 
     def test_tool_names(self, tmp_path: object) -> None:
         registry = build_default_registry(str(tmp_path))
@@ -296,6 +296,7 @@ class TestBuildDefaultRegistry:
             "write_file",
             "list_files",
             "search_files",
+            "search_vector_store",
             "run_command",
         }
 

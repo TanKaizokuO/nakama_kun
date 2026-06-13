@@ -42,6 +42,8 @@ class DirectoryScanner:
         "build",
         "target",
         "out",
+        ".nakama_rag",
+        ".chromadb",
     }
 
     def __init__(

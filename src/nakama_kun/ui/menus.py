@@ -113,6 +113,7 @@ class CLIMenuChoice(StrEnum):
     AGENT = "Agent Mode"
     PLAN  = "Plan Mode"
     ASK   = "Ask Mode"
+    VOICE = "Voice Mode"
     EXPLAIN = "Explain Project"
     MEMORY = "Memory Actions"
     BACK  = "Back"
@@ -122,6 +123,7 @@ _CLI_MENU_CHOICES: list[str] = [
     CLIMenuChoice.AGENT.value,
     CLIMenuChoice.PLAN.value,
     CLIMenuChoice.ASK.value,
+    CLIMenuChoice.VOICE.value,
     CLIMenuChoice.EXPLAIN.value,
     CLIMenuChoice.MEMORY.value,
     CLIMenuChoice.BACK.value,

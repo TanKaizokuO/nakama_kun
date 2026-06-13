@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from nakama_kun.safety.manager import SafetyManager
-from nakama_kun.safety.models import AutoApprovalProvider
 from nakama_kun.safety.terminal import TerminalApprovalProvider
 from nakama_kun.tools.core.write_file import WriteFileTool
 
@@ -116,21 +115,22 @@ async def test_write_file_terminal_approval_provider_async(tmp_path: Path) -> No
     )
     target = tmp_path / "approved.txt"
     
-    with patch("questionary.confirm", return_value=mock_confirm):
-        with warnings.catch_warnings(record=True) as caught_warnings:
-            warnings.simplefilter("always")
-            
-            result = await tool.execute(path=str(target), content="approved content")
-            
-            assert result.success
-            assert target.exists()
-            assert target.read_text(encoding="utf-8") == "approved content"
-            
-            # Ensure prompt was confirmed asynchronously
-            mock_confirm.ask_async.assert_called_once()
-            
-            # Verify no RuntimeWarning occurred
-            runtime_warnings = [
-                w for w in caught_warnings if issubclass(w.category, RuntimeWarning)
-            ]
-            assert len(runtime_warnings) == 0
+    with patch("questionary.confirm", return_value=mock_confirm), warnings.catch_warnings(
+        record=True
+    ) as caught_warnings:
+        warnings.simplefilter("always")
+        
+        result = await tool.execute(path=str(target), content="approved content")
+        
+        assert result.success
+        assert target.exists()
+        assert target.read_text(encoding="utf-8") == "approved content"
+        
+        # Ensure prompt was confirmed asynchronously
+        mock_confirm.ask_async.assert_called_once()
+        
+        # Verify no RuntimeWarning occurred
+        runtime_warnings = [
+            w for w in caught_warnings if issubclass(w.category, RuntimeWarning)
+        ]
+        assert len(runtime_warnings) == 0

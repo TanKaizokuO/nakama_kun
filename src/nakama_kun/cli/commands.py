@@ -29,7 +29,11 @@ without pulling in the full Typer app.
 
 from __future__ import annotations
 
+import typer
+
+from nakama_kun.cli.mcp_cmd import mcp_app
 from nakama_kun.cli.memory_cmd import memory_app
+from nakama_kun.cli.rag_cmd import rag_app
 from nakama_kun.cli.wakeup import wakeup_command
 
 # ---------------------------------------------------------------------------
@@ -40,6 +44,9 @@ __all__ = [
     "wakeup_command",
     "explain_command",
     "memory_app",
+    "rag_app",
+    "mcp_app",
+    "web_command",
     # Phase 3+: add agent_command, plan_command, ask_command here
 ]
 
@@ -94,3 +101,12 @@ def explain_command() -> None:
 #     """Ask a single question and print the answer."""
 #     from nakama_kun.modes.ask_mode import AskMode
 #     AskMode().ask_once(question)
+
+
+def web_command(
+    host: str = typer.Option("127.0.0.1", help="Host interface to bind to."),
+    port: int = typer.Option(8000, help="Port to run the web server on."),
+) -> None:
+    """Launch the Web Interface dashboard for Nakama-kun."""
+    from nakama_kun.web import run_web_server
+    run_web_server(host=host, port=port)

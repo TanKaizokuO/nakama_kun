@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from nakama_kun.workspace.analyzer import WorkspaceAnalyzer
 from nakama_kun.workspace.context import WorkspaceContextBuilder
 from nakama_kun.workspace.scanner import DirectoryScanner
@@ -149,7 +151,6 @@ dependencies = ["typer"]
 
 
 def test_find_env_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import pytest
     from nakama_kun.config import find_env_file
 
     # Create dummy .env in temp path

@@ -109,66 +109,82 @@ class AgentMode(BaseMode):
             )
         )
 
-        tool_schemas = self._registry.all_schemas()
-        console.print(
-            f"[dim]Tools available: {', '.join(self._registry.names())}[/dim]\n"
+        from nakama_kun.mcp.manager import MCPManager
+
+        mcp_manager = MCPManager(
+            workspace_root=self._workspace_root,
+            approval_provider=self.approval_provider,
         )
 
-        # Persistent conversation history across tasks within this session
-        history: list[Message] = []
+        try:
+            await mcp_manager.connect_all()
+            mcp_tools = await mcp_manager.get_tools()
+            for tool in mcp_tools:
+                self._registry.register(tool)
 
-        while True:
-            try:
-                user_input = await questionary.text(
-                    "Task:", style=_MENU_STYLE
-                ).ask_async()
+            tool_schemas = self._registry.all_schemas()
+            console.print(
+                f"[dim]Tools available: {', '.join(self._registry.names())}[/dim]\n"
+            )
 
-                if user_input is None:
-                    console.print()
-                    break
+            # Persistent conversation history across tasks within this session
+            history: list[Message] = []
 
-                user_input = user_input.strip()
-                if not user_input:
-                    continue
-                if user_input.lower() == "exit":
-                    break
+            while True:
+                try:
+                    user_input = await questionary.text(
+                        "Task:", style=_MENU_STYLE
+                    ).ask_async()
 
-                # Run the agentic loop for this user request
-                final_answer = await self._agent_loop(
-                    user_input, history, tool_schemas
-                )
+                    if user_input is None:
+                        console.print()
+                        break
 
-                if final_answer:
-                    console.print("\n[bold cyan]nakama_kun:[/bold cyan]")
-                    console.print(
-                        f"[bold dim]Model: "
-                        f"{self._chat_service.provider.settings.openrouter_model}"
-                        f"[/bold dim]\n"
+                    user_input = user_input.strip()
+                    if not user_input:
+                        continue
+                    if user_input.lower() == "exit":
+                        break
+
+                    # Run the agentic loop for this user request
+                    final_answer = await self._agent_loop(
+                        user_input, history, tool_schemas
                     )
-                    with Live(Markdown(""), auto_refresh=False) as live:
-                        live.update(Markdown(final_answer))
-                        live.refresh()
-                    console.print()
 
-                    # Persist assistant reply in shared history
-                    history.append(Message(role="assistant", content=final_answer))
+                    if final_answer:
+                        console.print("\n[bold cyan]nakama_kun:[/bold cyan]")
+                        console.print(
+                            f"[bold dim]Model: "
+                            f"{self._chat_service.provider.settings.openrouter_model}"
+                            f"[/bold dim]\n"
+                        )
+                        with Live(Markdown(""), auto_refresh=False) as live:
+                            live.update(Markdown(final_answer))
+                            live.refresh()
+                        console.print()
 
-            except APIKeyNotFoundError:
-                console.print("\n[bold red]API key not found.[/bold red]\n")
-            except RateLimitError:
-                console.print(
-                    "\n[bold red]Rate limit exceeded. Try again later.[/bold red]\n"
-                )
-            except NetworkError:
-                console.print("\n[bold red]Unable to reach provider.[/bold red]\n")
-            except InvalidModelError:
-                console.print(
-                    "\n[bold red]Configured model unavailable.[/bold red]\n"
-                )
-            except AIError as e:
-                console.print(f"\n[bold red]AI Error: {e}[/bold red]\n")
-            except Exception as e:
-                console.print(f"\n[bold red]Unexpected error: {e}[/bold red]\n")
+                        # Persist assistant reply in shared history
+                        history.append(Message(role="assistant", content=final_answer))
+
+                except APIKeyNotFoundError:
+                    console.print("\n[bold red]API key not found.[/bold red]\n")
+                except RateLimitError:
+                    console.print(
+                        "\n[bold red]Rate limit exceeded. Try again later.[/bold red]\n"
+                    )
+                except NetworkError:
+                    console.print("\n[bold red]Unable to reach provider.[/bold red]\n")
+                except InvalidModelError:
+                    console.print(
+                        "\n[bold red]Configured model unavailable.[/bold red]\n"
+                    )
+                except AIError as e:
+                    console.print(f"\n[bold red]AI Error: {e}[/bold red]\n")
+                except Exception as e:
+                    console.print(f"\n[bold red]Unexpected error: {e}[/bold red]\n")
+
+        finally:
+            await mcp_manager.disconnect_all()
 
         return NavSignal.BACK
 
@@ -206,8 +222,17 @@ class AgentMode(BaseMode):
             tool_router=self._router,
         ).compile()
 
+        # Retrieve matching codebase chunks for initial context
+        from nakama_kun.rag import get_retriever
+        initial_messages = list(history)
+        retriever = get_retriever(self._workspace_root)
+        if retriever is not None:
+            rag_context = retriever.retrieve_formatted_context(user_task)
+            if rag_context:
+                initial_messages.append(Message(role="system", content=rag_context))
+
         # Build initial workflow state
-        initial_state = {
+        initial_state: dict[str, Any] = {
             "goal": user_task,
             "plan": None,
             "required_artifacts": [],
@@ -222,7 +247,7 @@ class AgentMode(BaseMode):
                 "reviewer_feedback": [],
                 "failed_attempt_signatures": [],
             },
-            "messages": list(history),
+            "messages": initial_messages,
             "tool_results": [],
             "reviewer_feedback": None,
             "retry_count": 0,
