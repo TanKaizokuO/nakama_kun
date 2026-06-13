@@ -824,13 +824,13 @@ def make_verifier_node(workspace_root: str | None = None) -> Callable[[AgentStat
     return verifier_node
 
 
-def make_reviewer_node(chat_service: ChatService) -> Callable[[AgentState], Any]:
+def make_reviewer_node(chat_service: ChatService, workspace_root: str | None = None) -> Callable[[AgentState], Any]:
     """Factory creating the Reviewer Node.
 
     Reviewer node inspects the execution log and decides if the goal was met.
     """
 
-    async def reviewer_node(state: AgentState) -> dict[str, Any]:
+    async def reviewer_node_inner(state: AgentState) -> dict[str, Any]:
         logger.info("[LangGraph] Reviewer Node starting...")
         
         from unittest.mock import MagicMock, Mock
@@ -1082,6 +1082,120 @@ def make_reviewer_node(chat_service: ChatService) -> Callable[[AgentState], Any]
                 "status": "planning",
                 "messages": [Message(role="assistant", content=f"Reviewer: Rejected. {content}")],
             }
+
+    async def reviewer_node(state: AgentState) -> dict[str, Any]:
+        res = await reviewer_node_inner(state)
+        try:
+            from nakama_kun.config.memory import MemorySettings
+            from nakama_kun.memory.sqlite_store import SQLiteMemoryStore
+            from nakama_kun.memory.manager import MemoryManager
+            import os
+            from pathlib import Path
+
+            settings = MemorySettings()
+            if settings.memory_enabled:
+                store = SQLiteMemoryStore(settings.memory_db_path)
+                root_dir = workspace_root or state.get("workspace_root") or os.getcwd()
+                manager = MemoryManager(store, workspace_root=root_dir)
+                
+                goal = state.get("goal", "")
+                plan = state.get("plan")
+                plan_summary = ""
+                if plan:
+                    if hasattr(plan, "goal_summary"):
+                        plan_summary = plan.goal_summary
+                    elif isinstance(plan, dict):
+                        plan_summary = plan.get("goal_summary", "")
+                    else:
+                        plan_summary = str(plan)
+                
+                verification_report = state.get("verification_report")
+                is_approved = res.get("reviewer_feedback") is None
+                
+                if is_approved:
+                    tools_used = []
+                    seen_tools = set()
+                    for r in state.get("tool_results", []):
+                        t = r.get("tool")
+                        if t and t not in seen_tools:
+                            seen_tools.add(t)
+                            tools_used.append(t)
+                            
+                    files_changed = []
+                    if verification_report:
+                        all_artifacts = [
+                            *getattr(verification_report, "files_created", []),
+                            *getattr(verification_report, "files_modified", []),
+                        ]
+                        for fa in all_artifacts:
+                            path_str = fa.path
+                            if root_dir:
+                                try:
+                                    p = Path(path_str)
+                                    if p.is_absolute():
+                                        path_str = str(p.relative_to(Path(root_dir).resolve()))
+                                except ValueError:
+                                    pass
+                            files_changed.append(path_str)
+                            
+                    outcome = ""
+                    if res.get("messages"):
+                        outcome = res["messages"][-1].content
+                    if not outcome and verification_report:
+                        outcome = verification_report.summary
+                    if not outcome:
+                        outcome = "QA Approved"
+                        
+                    manager.save_successful_task(
+                        goal=goal,
+                        plan_summary=plan_summary,
+                        files_changed=files_changed,
+                        tools_used=tools_used,
+                        outcome=outcome,
+                    )
+                else:
+                    attempted_actions = []
+                    retry_mem = state.get("retry_memory") or {}
+                    if isinstance(retry_mem, dict):
+                        attempted_actions.extend(retry_mem.get("completed_actions", []))
+                        attempted_actions.extend(retry_mem.get("failed_actions", []))
+                    if not attempted_actions:
+                        for r in state.get("tool_results", []):
+                            t = r.get("tool")
+                            if t:
+                                args = r.get("arguments", {})
+                                args_str = json.dumps(args) if isinstance(args, dict) else str(args)
+                                attempted_actions.append(f"{t}({args_str})")
+                                
+                    failure_message = res.get("reviewer_feedback") or ""
+                    if not failure_message and verification_report:
+                        signal = verification_report.evaluate_outcome()
+                        failure_message = signal.reason
+                    if not failure_message:
+                        failure_message = "Rejected by QA reviewer."
+                        
+                    missing_artifacts = state.get("missing_artifacts", [])
+                    if missing_artifacts or "Missing Required Artifacts" in failure_message:
+                        failure_type = "MISSING_ARTIFACTS"
+                    elif verification_report and verification_report.evaluate_outcome().any_test_failed:
+                        failure_type = "TEST_FAILURE"
+                    else:
+                        failure_type = "QA_REJECTION"
+                        
+                    route = res.get("reviewer_route") or "planner"
+                    resolution = f"Route to {route}"
+                    
+                    manager.save_failure_record(
+                        goal=goal,
+                        attempted_actions=attempted_actions,
+                        failure_type=failure_type,
+                        failure_message=failure_message,
+                        resolution=resolution,
+                    )
+        except Exception as e:
+            logger.warning(f"Failed to log experience in MemoryManager: {e}")
+            
+        return res
 
     return reviewer_node
 

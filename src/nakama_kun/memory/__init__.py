@@ -4,6 +4,9 @@ from nakama_kun.config.memory import MemorySettings
 from nakama_kun.memory.interfaces import MemoryRepository
 from nakama_kun.memory.noop import NoOpMemoryRepository
 from nakama_kun.memory.sqlite import SQLiteMemoryRepository
+from nakama_kun.memory.models import SuccessfulTask, FailureRecord, UserPreference
+from nakama_kun.memory.sqlite_store import MemoryStore, SQLiteMemoryStore
+from nakama_kun.memory.manager import MemoryManager
 
 
 def get_memory_repository() -> MemoryRepository:
@@ -23,4 +26,11 @@ __all__ = [
     "SQLiteMemoryRepository",
     "NoOpMemoryRepository",
     "get_memory_repository",
+    "SuccessfulTask",
+    "FailureRecord",
+    "UserPreference",
+    "MemoryStore",
+    "SQLiteMemoryStore",
+    "MemoryManager",
 ]
+

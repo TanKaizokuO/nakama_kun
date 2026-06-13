@@ -89,7 +89,7 @@ def build_agent_graph(
     coder_node: Any = make_coder_node(chat_service)
     executor_node: Any = make_executor_node(chat_service, tool_registry, tool_router)
     verifier_node: Any = make_verifier_node(workspace_root)
-    reviewer_node: Any = make_reviewer_node(chat_service)
+    reviewer_node: Any = make_reviewer_node(chat_service, workspace_root)
     final_response_node: Any = make_final_response_node(chat_service)
 
     # 2. Add nodes to graph
