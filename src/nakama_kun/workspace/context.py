@@ -4,8 +4,9 @@ import os
 from pathlib import Path
 from typing import Any
 
-from nakama_kun.workspace.analyzer import ProjectAnalysis, WorkspaceAnalyzer
-from nakama_kun.workspace.scanner import DirectoryScanner, DirectoryScanResult
+from nakama_kun.workspace.analyzer import WorkspaceAnalyzer
+from nakama_kun.workspace.scanner import DirectoryScanner
+from nakama_kun.workspace.models import ProjectSnapshot
 
 
 class WorkspaceContextBuilder:
@@ -18,57 +19,36 @@ class WorkspaceContextBuilder:
 
     def build_summary(self) -> str:
         """Scan, analyze, and format the project context into a Markdown summary."""
-        scan_result = self.scanner.scan()
-        analysis = self.analyzer.analyze(scan_result)
-        summary = self.format_context(scan_result, analysis)
-        try:
-            from nakama_kun.memory import get_memory_repository
-            repo = get_memory_repository()
-            repo.save_project_summary(self.workspace_root.name, summary)
-        except Exception as e:
-            from loguru import logger
-            logger.warning(f"Failed to cache project summary: {e}")
-        return summary
+        snapshot_path = self.workspace_root / ".workspace" / "workspace_snapshot.json"
+        
+        snapshot = None
+        if snapshot_path.exists():
+            try:
+                with open(snapshot_path, encoding="utf-8") as f:
+                    snapshot = ProjectSnapshot.model_validate_json(f.read())
+            except Exception as e:
+                from loguru import logger
+                logger.warning(f"Failed to load cached workspace snapshot: {e}")
+        
+        if snapshot is None:
+            from nakama_kun.workspace.scanner_service import WorkspaceScanner
+            scanner = WorkspaceScanner(self.workspace_root)
+            snapshot = scanner.scan()
 
-    def format_context(self, scan_result: DirectoryScanResult, analysis: ProjectAnalysis) -> str:
-        """Render the DirectoryScanResult and ProjectAnalysis as a clean Markdown prompt addition."""
+        from nakama_kun.workspace.summary_builder import WorkspaceSummaryBuilder
+        summary_text = WorkspaceSummaryBuilder.build_summary(snapshot)
+
+        # Build combined summary to satisfy legacy tests (e.g. Workspace Context Summary header and tree view)
         lines = []
         lines.append("## Workspace Context Summary")
         lines.append(f"- **Project Root**: `{self.workspace_root.name}`")
-        lines.append(f"- **Primary Language**: {analysis.primary_language}")
-
-        # Languages breakdown
-        if analysis.languages:
-            lang_strs = [f"{lang} ({count})" for lang, count in sorted(analysis.languages.items(), key=lambda x: -x[1])]
-            lines.append(f"- **Languages Detected**: {', '.join(lang_strs)}")
-
-        # Frameworks
-        if analysis.frameworks:
-            lines.append(f"- **Frameworks/Tooling**: {', '.join(analysis.frameworks)}")
-        else:
-            lines.append("- **Frameworks/Tooling**: None detected")
-
-        # Layout & Tests
-        lines.append(f"- **Project Layout**: {analysis.layout}")
-        if analysis.test_directories:
-            lines.append(f"- **Test Directories**: {', '.join(analysis.test_directories)}")
-        else:
-            lines.append("- **Test Directories**: None found")
-
-        # Dependency configuration files
-        if analysis.dependency_files:
-            lines.append(f"- **Dependency Files**: {', '.join(analysis.dependency_files)}")
-
-        # Entry points
-        if analysis.entry_points:
-            lines.append(f"- **Entry Points**: {', '.join(analysis.entry_points)}")
-
-        # Total sizes
-        lines.append(f"- **Workspace Size**: {scan_result.total_size_bytes:,} bytes across {len(scan_result.files)} files")
+        
+        # Append main summary
+        lines.append(summary_text)
 
         # Directory structure overview (depth 2 tree visualization)
         lines.append("\n### Project Structure Overview")
-        tree_lines = self._generate_structure_tree(scan_result)
+        tree_lines = self._generate_structure_tree_from_snapshot(snapshot)
         if tree_lines:
             lines.append("```")
             lines.extend(tree_lines)
@@ -76,9 +56,19 @@ class WorkspaceContextBuilder:
         else:
             lines.append("No files detected.")
 
-        return "\n".join(lines)
+        summary = "\n".join(lines)
 
-    def _generate_structure_tree(self, scan_result: DirectoryScanResult) -> list[str]:
+        try:
+            from nakama_kun.memory import get_memory_repository
+            repo = get_memory_repository()
+            repo.save_project_summary(self.workspace_root.name, summary)
+        except Exception as e:
+            from loguru import logger
+            logger.warning(f"Failed to cache project summary: {e}")
+            
+        return summary
+
+    def _generate_structure_tree_from_snapshot(self, snapshot: ProjectSnapshot) -> list[str]:
         """Produce a simplified text-based directory tree representation of the workspace."""
         # Build nested dictionary of paths
         tree: dict[str, Any] = {}
@@ -87,7 +77,7 @@ class WorkspaceContextBuilder:
         root_files: list[str] = []
 
         # We'll process all folders first, then files
-        for folder in sorted(scan_result.folders):
+        for folder in sorted(snapshot.folders):
             parts = Path(folder).parts
             current = tree
             for part in parts[:3]:  # Limit depth to 3 in tree definition
@@ -95,11 +85,11 @@ class WorkspaceContextBuilder:
                     current[part] = {}
                 current = current[part]
 
-        for file_info in sorted(scan_result.files, key=lambda f: f.path):
-            parts = Path(file_info.path).parts
+        for file_path in sorted(snapshot.files):
+            parts = Path(file_path).parts
             # If it's a root file, save it
             if len(parts) == 1:
-                root_files.append(file_info.name)
+                root_files.append(parts[0])
             else:
                 # Add file under its folder in the tree
                 current = tree
@@ -137,11 +127,9 @@ class WorkspaceContextBuilder:
 
         # Draw any root level files that weren't inside folders or printed
         for file_name in root_files:
-            # If we already have lines, check if it's the last element overall
-            # Actually, to make formatting simple, just print them as root level elements
             output.append(f"├── {file_name}")
 
-        # Let's clean up tree lines: ensure no duplicate lines or files printed twice
+        # Clean up tree lines: ensure no duplicate lines or files printed twice
         unique_lines = []
         seen = set()
         for line in output:

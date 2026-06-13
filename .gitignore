@@ -55,3 +55,6 @@ dmypy.json
 
 # Runtime databases
 *.db
+
+# Nakama-kun workspace scanner cache
+.workspace/
