@@ -37,12 +37,30 @@ class PlannerAgent(BaseAgent):
             except Exception as e:
                 logger.warning(f"Failed to retrieve RAG context: {e}")
 
+        # Retrieve past experiences semantically
+        experience_context = ""
+        try:
+            from nakama_kun.config.memory import MemorySettings
+            from nakama_kun.memory.sqlite_store import SQLiteMemoryStore
+            from nakama_kun.memory.retriever import ExperienceRetriever
+
+            settings = MemorySettings()
+            if settings.memory_enabled:
+                store = SQLiteMemoryStore(settings.memory_db_path)
+                experience_retriever = ExperienceRetriever(store, workspace_root=state.get("workspace_root"))
+                bundle = experience_retriever.retrieve_experience(goal)
+                experience_context = bundle.format_as_markdown()
+        except Exception as e:
+            logger.warning(f"Failed to retrieve experience context: {e}")
+
         # Build full system prompt
         system_prompt = PLANNER_AGENT_PROMPT
         if workspace_context:
             system_prompt += f"\n\n### Workspace Context\n{workspace_context}"
         if rag_context:
             system_prompt += f"\n\n### Retrieved Codebase Context\n{rag_context}"
+        if experience_context:
+            system_prompt += f"\n\n### Past Experiences\n{experience_context}"
 
         # 2. Build user prompt/refinement context
         if feedback:

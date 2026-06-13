@@ -15,6 +15,8 @@ class MemoryManager:
     def __init__(self, store: MemoryStore, workspace_root: str | Path | None = None) -> None:
         self.store = store
         self.workspace_root = Path(workspace_root) if workspace_root else None
+        from nakama_kun.memory.indexer import MemoryIndexer
+        self.indexer = MemoryIndexer(self.store, workspace_root=self.workspace_root)
 
     def save_successful_task(
         self,
@@ -46,6 +48,9 @@ class MemoryManager:
         try:
             self.store.save_success(task)
             logger.info("MemoryManager: Saved successful task.")
+            self.indexer.index_success(task)
+            from nakama_kun.memory.retriever import ExperienceRetriever
+            ExperienceRetriever.clear_cache()
         except Exception as e:
             logger.error(f"MemoryManager: Failed to save successful task: {e}")
 
@@ -82,6 +87,9 @@ class MemoryManager:
         try:
             self.store.save_failure(failure)
             logger.info("MemoryManager: Saved failure record.")
+            self.indexer.index_failure(failure)
+            from nakama_kun.memory.retriever import ExperienceRetriever
+            ExperienceRetriever.clear_cache()
         except Exception as e:
             logger.error(f"MemoryManager: Failed to save failure record: {e}")
 

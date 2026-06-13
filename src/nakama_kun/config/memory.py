@@ -22,3 +22,6 @@ class MemorySettings(BaseSettings):
     memory_db_path: str = Field(
         default="nakama_memory.db", validation_alias="MEMORY_DB_PATH"
     )
+    memory_vector_db_path: str = Field(
+        default=".nakama_memory_vectors", validation_alias="MEMORY_VECTOR_DB_PATH"
+    )
