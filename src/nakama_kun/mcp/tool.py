@@ -91,15 +91,32 @@ class MCPTool(BaseTool):
     async def execute(self, **kwargs: Any) -> ToolResult:
         import time
         from nakama_kun.mcp.telemetry import MCPTelemetry
-        start_time = time.time()
+        from nakama_kun.mcp.safety import MCPSafetyControls
 
-        # 1. Enforce safety gating for mutating actions
-        if is_mutating_tool(self.original_name) or is_mutating_tool(self.name):
+        start_time = time.time()
+        is_mutating = is_mutating_tool(self.original_name) or is_mutating_tool(self.name)
+
+        # Check safety controls allowlists and read-only mode
+        safety = MCPSafetyControls.get_instance()
+        allowed, reason = safety.is_action_allowed(self.server_name, self.name, is_mutating)
+        if not allowed:
+            res = ToolResult(success=False, error=f"SAFETY_VIOLATION: {reason}")
+            MCPTelemetry.get_instance().record_call(
+                server=self.server_name,
+                tool=self.name,
+                start_time=start_time,
+                success=False,
+                error=res.error
+            )
+            return res
+
+        # 1. Enforce safety gating for mutating actions or if require_approval_all is enabled
+        if safety.require_approval_all or is_mutating:
             approved = await self._request_approval(kwargs)
             if not approved:
                 res = ToolResult(
                     success=False,
-                    error=f"Execution of mutating external tool '{self.name}' was rejected by the user.",
+                    error=f"Execution of external tool '{self.name}' was rejected by the user.",
                 )
                 MCPTelemetry.get_instance().record_call(
                     server=self.server_name,
