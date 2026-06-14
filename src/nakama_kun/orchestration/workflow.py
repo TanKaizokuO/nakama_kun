@@ -15,6 +15,7 @@ from nakama_kun.orchestration.nodes import (
     make_verifier_agent_node,
     make_retriever_agent_node,
     make_test_agent_node,
+    make_security_agent_node,
 )
 from nakama_kun.orchestration.state import AgentState
 from nakama_kun.tools import ToolRegistry, ToolRouter
@@ -101,6 +102,7 @@ def build_agent_graph(
     retriever_agent_node: Any = make_retriever_agent_node(chat_service, workspace_root)
     coder_agent_node: Any = make_coder_agent_node(chat_service, tool_registry, tool_router)
     test_agent_node: Any = make_test_agent_node(chat_service, tool_registry, tool_router)
+    security_agent_node: Any = make_security_agent_node(chat_service)
     verifier_agent_node: Any = make_verifier_agent_node(workspace_root, chat_service)
     reviewer_agent_node: Any = make_reviewer_agent_node(chat_service, workspace_root)
     final_response_node: Any = make_final_response_node(chat_service)
@@ -110,6 +112,7 @@ def build_agent_graph(
     workflow.add_node("retriever_agent_node", retriever_agent_node)
     workflow.add_node("coder_agent_node", coder_agent_node)
     workflow.add_node("test_agent_node", test_agent_node)
+    workflow.add_node("security_agent_node", security_agent_node)
     workflow.add_node("verifier_agent_node", verifier_agent_node)
     workflow.add_node("reviewer_agent_node", reviewer_agent_node)
     workflow.add_node("final_response", final_response_node)
@@ -129,7 +132,8 @@ def build_agent_graph(
         },
     )
     
-    workflow.add_edge("test_agent_node", "verifier_agent_node")
+    workflow.add_edge("test_agent_node", "security_agent_node")
+    workflow.add_edge("security_agent_node", "verifier_agent_node")
     workflow.add_edge("verifier_agent_node", "reviewer_agent_node")
 
     # Conditional routing after QA Review

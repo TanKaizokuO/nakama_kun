@@ -1477,6 +1477,41 @@ def make_reviewer_agent_node(chat_service: ChatService, workspace_root: str | No
     async def reviewer_agent_node(state: AgentState) -> dict[str, Any]:
         logger.info("[LangGraph] Reviewer Agent Node starting...")
         
+        # Security Gate check
+        security_report = state.get("security_report")
+        if security_report:
+            vulnerabilities = security_report.vulnerabilities or []
+            blocked_actions = security_report.blocked_actions or []
+            if vulnerabilities or blocked_actions:
+                feedback = (
+                    "[REJECTED BY SECURITY GATE]\n"
+                    "Identified Security Issues:\n"
+                    + "\n".join(f"- Vulnerability: {v}" for v in vulnerabilities)
+                    + "\n"
+                    + "\n".join(f"- Blocked Action: {b}" for b in blocked_actions)
+                    + "\n\nTask rejected due to security concerns."
+                )
+                logger.info("[LangGraph] QA Review: deterministic security gate rejected.")
+                history = list(state.get("agent_history", []))
+                history.append({
+                    "agent": "ReviewerAgent",
+                    "thought": "Rejected due to security vulnerabilities or blocked actions.",
+                    "handoff": {
+                        "approved": False,
+                        "route_to": "coder",
+                        "feedback": feedback,
+                        "bugs": vulnerabilities + blocked_actions,
+                        "risks": []
+                    }
+                })
+                return {
+                    "reviewer_feedback": feedback,
+                    "reviewer_route": "coder",
+                    "status": "executing",
+                    "agent_history": history,
+                    "messages": [Message(role="assistant", content=f"Reviewer: Rejected by Security. {feedback}")],
+                }
+
         missing_artifacts = state.get("missing_artifacts", [])
         if missing_artifacts:
             feedback = (
@@ -1762,4 +1797,21 @@ def make_test_agent_node(
         return res
 
     return test_agent_node
+
+
+def make_security_agent_node(
+    chat_service: ChatService,
+) -> Callable[[AgentState], Any]:
+    """Factory creating the Security Agent Node.
+
+    Security Agent performs secret checks, unsafe command checks, and code/dependency security reviews.
+    """
+    async def security_agent_node(state: AgentState) -> dict[str, Any]:
+        logger.info("[LangGraph] Security Agent Node starting...")
+        from nakama_kun.agents.security import SecurityAgent
+        agent = SecurityAgent(chat_service=chat_service)
+        res = await agent.run(dict(state))
+        return res
+
+    return security_agent_node
 
