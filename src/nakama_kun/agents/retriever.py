@@ -7,7 +7,8 @@ from loguru import logger
 from nakama_kun.agents.base import BaseAgent
 from nakama_kun.agents.models import RetrievalPackage, parse_retrieval_package
 from nakama_kun.ai.models.message import Message
-from nakama_kun.rag.retriever import RepositoryKnowledgeService, get_retriever
+from nakama_kun.rag import get_retriever
+from nakama_kun.rag.retriever import RepositoryKnowledgeService
 
 
 class RetrieverAgent(BaseAgent):

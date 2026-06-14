@@ -9,20 +9,6 @@ from nakama_kun.agents.base import BaseAgent
 from nakama_kun.ai.models.message import Message
 from nakama_kun.ai.services.chat_service import ChatService
 from nakama_kun.orchestration.goal_satisfaction import check_goal_satisfaction
-from nakama_kun.orchestration.nodes import (
-    DELIVERY_TOOLS,
-    EXPLORATION_TOOLS,
-    RESEARCH_THRESHOLD,
-    _action_signature,
-    _build_attempt_history,
-    _count_research_actions,
-    _delivery_guidance,
-    _extract_tool_error,
-    _missing_required_artifacts,
-    _prioritize_tool_schemas,
-    _render_tool_observation,
-    _tool_call_key,
-)
 import re
 from nakama_kun.agents.models import CoderHandoff
 from nakama_kun.tools import ToolRegistry, ToolResult, ToolRouter
@@ -97,6 +83,21 @@ class CoderAgent(BaseAgent):
         return self.memory.get("implementation_history", [])
 
     async def execute(self, state: dict[str, Any]) -> dict[str, Any]:
+        from nakama_kun.orchestration.nodes import (
+            DELIVERY_TOOLS,
+            EXPLORATION_TOOLS,
+            RESEARCH_THRESHOLD,
+            _action_signature,
+            _build_attempt_history,
+            _count_research_actions,
+            _delivery_guidance,
+            _extract_tool_error,
+            _missing_required_artifacts,
+            _prioritize_tool_schemas,
+            _render_tool_observation,
+            _tool_call_key,
+        )
+
         logger.info("[CoderAgent] Starting coding/execution task...")
         goal = state["goal"]
         plan = state.get("plan")

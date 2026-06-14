@@ -86,6 +86,48 @@ def _build_agent_mode(chat_service: Any, registry: ToolRegistry | None = None) -
 class TestAgentLoop:
     """Tests for AgentMode._agent_loop()."""
 
+    @pytest.fixture(autouse=True)
+    def mock_agents(self) -> Any:
+        from unittest.mock import patch
+        from nakama_kun.agents.models import RetrievalPackage, TestExecutionReport
+        
+        async def mock_retriever_execute(state: dict[str, Any]) -> dict[str, Any]:
+            pkg = RetrievalPackage(
+                retrieved_files=[],
+                summaries={},
+                citations={},
+                relevance_scores={},
+            )
+            return {
+                "retrieval_package": pkg,
+                "relevant_files": [],
+                "documentation": "",
+                "agent_history": [],
+                "messages": [Message(role="assistant", content="Retrieved relevant codebase context for task. Relevant files: ")],
+                "status": "executing",
+            }
+            
+        async def mock_test_agent_execute(state: dict[str, Any]) -> dict[str, Any]:
+            report = TestExecutionReport(
+                passed=1,
+                failed=0,
+                skipped=0,
+                errors=0,
+                recommendations=["Mocked test pass"],
+            )
+            return {
+                "test_report": report,
+                "failure_analysis": "Mocked test pass",
+                "agent_history": [],
+                "messages": [Message(role="assistant", content="TestAgent validation completed. Results: passed=1, failed=0, errors=0")],
+                "tool_results": [],
+                "status": "reviewing",
+            }
+            
+        with patch("nakama_kun.agents.retriever.RetrieverAgent.execute", side_effect=mock_retriever_execute), \
+             patch("nakama_kun.agents.test_agent.TestAgent.execute", side_effect=mock_test_agent_execute):
+            yield
+
     def _make_chat_service(self, responses: list[AIResponse]) -> Any:
         """Build a mock ChatService that yields responses in order."""
         chat_service = MagicMock()
