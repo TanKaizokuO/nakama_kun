@@ -89,7 +89,7 @@ class TestAgentLoop:
     @pytest.fixture(autouse=True)
     def mock_agents(self) -> Any:
         from unittest.mock import patch
-        from nakama_kun.agents.models import RetrievalPackage, TestExecutionReport
+        from nakama_kun.agents.models import RetrievalPackage, TestExecutionReport, SecurityReport
         
         async def mock_retriever_execute(state: dict[str, Any]) -> dict[str, Any]:
             pkg = RetrievalPackage(
@@ -123,9 +123,24 @@ class TestAgentLoop:
                 "tool_results": [],
                 "status": "reviewing",
             }
+
+        async def mock_security_agent_execute(state: dict[str, Any]) -> dict[str, Any]:
+            report = SecurityReport(
+                warnings=[],
+                vulnerabilities=[],
+                blocked_actions=[],
+                remediation_suggestions=[],
+            )
+            return {
+                "security_report": report,
+                "agent_history": [],
+                "messages": [Message(role="assistant", content="SecurityAgent validation completed. Found 0 vulnerability warning(s) and 0 blocked action(s).")],
+                "status": "verifying",
+            }
             
         with patch("nakama_kun.agents.retriever.RetrieverAgent.execute", side_effect=mock_retriever_execute), \
-             patch("nakama_kun.agents.test_agent.TestAgent.execute", side_effect=mock_test_agent_execute):
+             patch("nakama_kun.agents.test_agent.TestAgent.execute", side_effect=mock_test_agent_execute), \
+             patch("nakama_kun.agents.security.SecurityAgent.execute", side_effect=mock_security_agent_execute):
             yield
 
     def _make_chat_service(self, responses: list[AIResponse]) -> Any:

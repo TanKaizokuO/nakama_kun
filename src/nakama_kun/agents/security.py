@@ -47,7 +47,7 @@ class SecurityAgent(BaseAgent):
 
         # Unsafe command detection pattern
         unsafe_cmd_regex = re.compile(
-            r"\b(rm\s+-rf\s+/|chmod\s+777|curl\s+.*\s*\|\s*(bash|sh)|wget\s+.*\s*\|\s*(bash|sh)|sudo\s+rm|mkfs|dd\s+if=)\b",
+            r"rm\s+-rf\s+/|chmod\s+777|curl\s+.*\s*\|\s*(bash|sh)|wget\s+.*\s*\|\s*(bash|sh)|sudo\s+rm|mkfs|dd\s+if=",
             re.IGNORECASE
         )
 
