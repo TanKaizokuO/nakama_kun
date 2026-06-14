@@ -72,9 +72,11 @@ class BaseAgent(ABC):
         # 1. Execute agent logic based on role
         if self.role == "planner":
             updates = await self.plan(state)
+        elif self.role == "retriever":
+            updates = await self.execute(state)
         elif self.role == "coder":
             updates = await self.execute(state)
-        elif self.role == "verifier":
+        elif self.role in ("verifier", "tester"):
             updates = await self.execute(state)
         elif self.role == "reviewer":
             updates = await self.review(state)
@@ -90,12 +92,16 @@ class BaseAgent(ABC):
         outputs = dict(state.get("agent_outputs") or {})
         if self.role == "planner":
             outputs[self.name] = updates.get("plan")
+        elif self.role == "retriever":
+            outputs[self.name] = updates.get("retrieval_package")
         elif self.role == "coder":
             # Store coder proposals or tool outputs
             outputs[self.name] = {
                 "proposals": updates.get("coder_proposals"),
                 "tool_results": updates.get("tool_results"),
             }
+        elif self.role == "tester":
+            outputs[self.name] = updates.get("test_report")
         elif self.role == "verifier":
             outputs[self.name] = updates.get("verification_report")
         elif self.role == "reviewer":
@@ -123,15 +129,20 @@ class BaseAgent(ABC):
                     if isinstance(handoff, dict) and "goal_summary" in handoff:
                         plans.append(handoff)
             self._memory["successful_plans"] = plans
+        elif self.role == "retriever":
+            self._memory["retrieval_history"] = [
+                h for h in history
+                if h.get("agent") in ("RetrieverAgent", self.name)
+            ]
         elif self.role == "coder":
             self._memory["implementation_history"] = [
                 h for h in history
                 if h.get("agent") in ("CoderAgent", "ExecutorAgent", self.name)
             ]
-        elif self.role == "verifier":
+        elif self.role in ("verifier", "tester"):
             self._memory["validation_history"] = [
                 h for h in history
-                if h.get("agent") in ("VerifierAgent", self.name)
+                if h.get("agent") in ("VerifierAgent", "TestAgent", self.name)
             ]
         elif self.role == "reviewer":
             self._memory["review_history"] = [

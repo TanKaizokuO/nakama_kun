@@ -29,3 +29,45 @@ class ReviewerHandoff(BaseModel):
     )
     bugs: list[str] = Field(default_factory=list, description="List of identified bugs, code style issues, or test failures.")
     risks: list[str] = Field(default_factory=list, description="Identified architectural risks or security concerns.")
+
+
+class RetrievalPackage(BaseModel):
+    """The structured state representing repository search results, summaries, and citations."""
+
+    retrieved_files: list[str] = Field(default_factory=list, description="List of relevant retrieved files.")
+    summaries: dict[str, str] = Field(default_factory=dict, description="Brief summary of what each file implements/contains.")
+    citations: dict[str, str] = Field(default_factory=dict, description="Citations/source context mapping for each file.")
+    relevance_scores: dict[str, float] = Field(default_factory=dict, description="Semantic relevance score for each file.")
+
+
+def parse_retrieval_package(text: str) -> RetrievalPackage | None:
+    """Parse a structured RetrievalPackage model from JSON text or code blocks."""
+    import json
+    import re
+    text_stripped = text.strip()
+    try:
+        data = json.loads(text_stripped)
+        return RetrievalPackage.model_validate(data)
+    except Exception:
+        pass
+
+    # Try matching json block ```json ... ```
+    match = re.search(r"```json\s*(.*?)\s*```", text_stripped, re.DOTALL | re.IGNORECASE)
+    if match:
+        try:
+            data = json.loads(match.group(1).strip())
+            return RetrievalPackage.model_validate(data)
+        except Exception:
+            pass
+
+    # Try matching general block ``` ... ```
+    match = re.search(r"```\s*(.*?)\s*```", text_stripped, re.DOTALL | re.IGNORECASE)
+    if match:
+        try:
+            data = json.loads(match.group(1).strip())
+            return RetrievalPackage.model_validate(data)
+        except Exception:
+            pass
+
+    return None
+

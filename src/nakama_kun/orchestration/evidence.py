@@ -102,6 +102,46 @@ class TestOutputEvidence:
         }
 
 
+class RetrievalEvidence:
+    """Preserves repository retrieval events and retrieved context details."""
+    __slots__ = ("goal", "retrieved_files", "summaries", "relevance_scores")
+
+    def __init__(self, goal: str, retrieved_files: list[str], summaries: dict[str, str], relevance_scores: dict[str, float]) -> None:
+        self.goal = goal
+        self.retrieved_files = retrieved_files
+        self.summaries = summaries
+        self.relevance_scores = relevance_scores
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "goal": self.goal,
+            "retrieved_files": self.retrieved_files,
+            "summaries": self.summaries,
+            "relevance_scores": self.relevance_scores,
+        }
+
+
+class TestingEvidence:
+    """Preserves implementation testing execution results and recommendations."""
+    __slots__ = ("passed", "failed", "skipped", "errors", "recommendations")
+
+    def __init__(self, passed: int, failed: int, skipped: int, errors: int, recommendations: list[str]) -> None:
+        self.passed = passed
+        self.failed = failed
+        self.skipped = skipped
+        self.errors = errors
+        self.recommendations = recommendations
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "passed": self.passed,
+            "failed": self.failed,
+            "skipped": self.skipped,
+            "errors": self.errors,
+            "recommendations": self.recommendations,
+        }
+
+
 class EvidenceStore:
     """A persistent registry preserving execution and validation evidence."""
 
@@ -110,6 +150,8 @@ class EvidenceStore:
         self.file_validations: list[FileValidationEvidence] = []
         self.command_outputs: list[CommandOutputEvidence] = []
         self.test_outputs: list[TestOutputEvidence] = []
+        self.retrieval_evidence: list[RetrievalEvidence] = []
+        self.testing_evidence: list[TestingEvidence] = []
 
     def add_tool_output(self, tool: str, arguments: dict[str, Any], success: bool, output: str) -> None:
         self.tool_outputs.append(ToolOutputEvidence(tool, arguments, success, output))
@@ -133,12 +175,37 @@ class EvidenceStore:
             TestOutputEvidence(cmd, passed, failed, errors, skipped, success)
         )
 
+    def add_retrieval_evidence(
+        self,
+        goal: str,
+        retrieved_files: list[str],
+        summaries: dict[str, str],
+        relevance_scores: dict[str, float],
+    ) -> None:
+        self.retrieval_evidence.append(
+            RetrievalEvidence(goal, retrieved_files, summaries, relevance_scores)
+        )
+
+    def add_testing_evidence(
+        self,
+        passed: int,
+        failed: int,
+        skipped: int,
+        errors: int,
+        recommendations: list[str],
+    ) -> None:
+        self.testing_evidence.append(
+            TestingEvidence(passed, failed, skipped, errors, recommendations)
+        )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "tool_outputs": [t.to_dict() for t in self.tool_outputs],
             "file_validations": [f.to_dict() for f in self.file_validations],
             "command_outputs": [c.to_dict() for c in self.command_outputs],
             "test_outputs": [t.to_dict() for t in self.test_outputs],
+            "retrieval_evidence": [r.to_dict() for r in self.retrieval_evidence],
+            "testing_evidence": [t.to_dict() for t in self.testing_evidence],
         }
 
 
@@ -255,5 +322,43 @@ def build_evidence_store(
                     skipped=ts.get("skipped", 0),
                     success=ts.get("success", False),
                 )
+
+    # 3. Process retrieval_package
+    retrieval_package = state.get("retrieval_package")
+    if retrieval_package:
+        if hasattr(retrieval_package, "retrieved_files"):
+            store.add_retrieval_evidence(
+                goal=state.get("goal", ""),
+                retrieved_files=retrieval_package.retrieved_files,
+                summaries=retrieval_package.summaries,
+                relevance_scores=retrieval_package.relevance_scores,
+            )
+        elif isinstance(retrieval_package, dict):
+            store.add_retrieval_evidence(
+                goal=state.get("goal", ""),
+                retrieved_files=retrieval_package.get("retrieved_files", []),
+                summaries=retrieval_package.get("summaries", {}),
+                relevance_scores=retrieval_package.get("relevance_scores", {}),
+            )
+
+    # 4. Process test_report
+    test_report = state.get("test_report")
+    if test_report:
+        if hasattr(test_report, "passed"):
+            store.add_testing_evidence(
+                passed=test_report.passed,
+                failed=test_report.failed,
+                skipped=test_report.skipped,
+                errors=test_report.errors,
+                recommendations=test_report.recommendations,
+            )
+        elif isinstance(test_report, dict):
+            store.add_testing_evidence(
+                passed=test_report.get("passed", 0),
+                failed=test_report.get("failed", 0),
+                skipped=test_report.get("skipped", 0),
+                errors=test_report.get("errors", 0),
+                recommendations=test_report.get("recommendations", []),
+            )
 
     return store
