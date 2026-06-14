@@ -21,13 +21,13 @@ def test_servers_startup_and_declaration() -> None:
     assert browser_mcp.name == "browser"
 
     # Verify that tools are registered
-    assert len(filesystem_mcp.tools) >= 4
-    assert len(github_mcp.tools) >= 4
-    assert len(postgres_mcp.tools) >= 3
-    assert len(browser_mcp.tools) >= 3
+    assert len(filesystem_mcp._tool_manager._tools) >= 4
+    assert len(github_mcp._tool_manager._tools) >= 4
+    assert len(postgres_mcp._tool_manager._tools) >= 3
+    assert len(browser_mcp._tool_manager._tools) >= 3
 
     # Check filesystem tool names
-    fs_tool_names = set(filesystem_mcp.tools.keys())
+    fs_tool_names = set(filesystem_mcp._tool_manager._tools.keys())
     assert "read_file" in fs_tool_names
     assert "write_file" in fs_tool_names
     assert "list_directory" in fs_tool_names
@@ -82,7 +82,7 @@ def test_auth_validation_browser_and_filesystem(tmp_path: Path) -> None:
 
 def test_tool_metadata_docstring_parsing() -> None:
     # Verify the filesystem read_file tool has properties
-    read_tool = filesystem_mcp.tools["read_file"]
+    read_tool = filesystem_mcp._tool_manager._tools["read_file"]
     desc = read_tool.description
     assert "Read the content" in desc
     assert "Permissions: filesystem_read" in desc
@@ -111,8 +111,8 @@ def test_tool_metadata_docstring_parsing() -> None:
 def test_tool_executions_mock_mode(tmp_path: Path) -> None:
     # 1. Filesystem read/write execution
     test_file = os.path.join(str(tmp_path), "test.txt")
-    write_func = filesystem_mcp.tools["write_file"].fn
-    read_func = filesystem_mcp.tools["read_file"].fn
+    write_func = filesystem_mcp._tool_manager._tools["write_file"].fn
+    read_func = filesystem_mcp._tool_manager._tools["read_file"].fn
 
     w_res = write_func(test_file, "hello filesystem")
     assert "written successfully" in w_res
@@ -122,18 +122,18 @@ def test_tool_executions_mock_mode(tmp_path: Path) -> None:
 
     # 2. GitHub Mock Execution
     with patch.dict(os.environ, {"GITHUB_TOKEN": "mock_token"}):
-        create_issue_func = github_mcp.tools["github_create_issue"].fn
+        create_issue_func = github_mcp._tool_manager._tools["github_create_issue"].fn
         res = create_issue_func("owner", "repo", "Bug Title", "Body text")
         assert "MOCK" in res
 
     # 3. Postgres Mock Execution
     with patch.dict(os.environ, {"POSTGRES_MOCK": "true"}):
-        query_func = postgres_mcp.tools["postgres_query"].fn
+        query_func = postgres_mcp._tool_manager._tools["postgres_query"].fn
         res = query_func("SELECT 1;")
         assert "Columns: 1" in res
 
     # 4. Browser Mock Execution
     with patch.dict(os.environ, {"BROWSER_MOCK": "true"}):
-        search_func = browser_mcp.tools["browser_search"].fn
+        search_func = browser_mcp._tool_manager._tools["browser_search"].fn
         res = search_func("test query")
         assert "MOCK" in res
