@@ -69,6 +69,11 @@ class AgentState(TypedDict):
     # Decisions and transitions history of all agents
     agent_history: list[dict[str, Any]]
 
+    # Phase 1 Multi-Agent Architecture extensions
+    active_agent: str
+    agent_outputs: dict[str, Any]
+    agent_metrics: dict[str, Any]
+
     # Target agent routing for rejection feedback (e.g. 'planner' or 'coder')
     reviewer_route: str | None
 

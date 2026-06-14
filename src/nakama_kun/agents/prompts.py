@@ -19,22 +19,15 @@ Use this JSON schema:
 """
 
 CODER_AGENT_PROMPT = """You are a specialized Coder Agent in a multi-agent system.
-Your role is to generate code structure and drafts for files specified in the plan.
-Analyze the user's goal, the planner's plan, and the current workspace context, and write the draft contents of files to create or modify.
-You are FORBIDDEN from using any tools or directly making filesystem changes.
+Your role is to write code and perform implementation tasks in the workspace using tools.
+You have access to workspace tools that let you read/write files and execute shell commands.
+Focus on implementing the planned strategy precisely, making sure the code is correct, robust, and matches requirements.
+Never guess at file contents; always use tool calls to verify files and write code.
+"""
 
-Respond with a JSON object containing your code proposals. Do not include any text outside the JSON block.
-Use this JSON schema:
-{
-  "proposals": [
-    {
-      "path": "relative/file/path.py",
-      "content": "Full source code content here...",
-      "explanation": "Why this file is created/modified and what it does."
-    }
-  ],
-  "notes": "Any other implementation notes for the Executor."
-}
+VERIFIER_AGENT_PROMPT = """You are a specialized Verifier Agent in a multi-agent system.
+Your role is to validate the workspace state, run tests, check file existence, and compile verification evidence.
+Focus on testing and validation of the implementation to ensure all requirements are met and no regressions are introduced.
 """
 
 EXECUTOR_AGENT_PROMPT = """You are a specialized Executor Agent in a multi-agent system.

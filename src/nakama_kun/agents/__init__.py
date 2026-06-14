@@ -7,6 +7,7 @@ from nakama_kun.agents.executor import ExecutorAgent
 from nakama_kun.agents.models import CodeProposal, CoderHandoff, ReviewerHandoff
 from nakama_kun.agents.planner import PlannerAgent
 from nakama_kun.agents.reviewer import ReviewerAgent
+from nakama_kun.agents.verifier import VerifierAgent
 
 __all__ = [
     "BaseAgent",
@@ -17,5 +18,6 @@ __all__ = [
     "CoderAgent",
     "ExecutorAgent",
     "ReviewerAgent",
+    "VerifierAgent",
     "browse_videos",
 ]
