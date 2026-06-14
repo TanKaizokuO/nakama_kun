@@ -5,7 +5,7 @@ from typing import Annotated, Any, TypedDict
 
 from nakama_kun.ai.models.message import Message
 from nakama_kun.ai.models.plan import Plan
-from nakama_kun.agents.models import RetrievalPackage, TestExecutionReport
+from nakama_kun.agents.models import RetrievalPackage, TestExecutionReport, AgentMessage, SecurityReport
 from nakama_kun.orchestration.evidence import EvidenceStore
 from nakama_kun.orchestration.task_classifier import TaskType
 from nakama_kun.orchestration.verification import VerificationReport
@@ -92,6 +92,10 @@ class AgentState(TypedDict):
     # Phase 2 Multi-Agent Architecture extensions
     retrieval_package: RetrievalPackage | None
     test_report: TestExecutionReport | None
+
+    # Phase 3 Multi-Agent Architecture extensions
+    security_report: SecurityReport | None
+    agent_messages: list[AgentMessage]
 
 
 

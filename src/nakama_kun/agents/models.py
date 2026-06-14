@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+from typing import Any
 from pydantic import BaseModel, Field
 
 
@@ -153,5 +155,15 @@ def parse_security_report(text: str) -> SecurityReport | None:
             pass
 
     return None
+
+
+class AgentMessage(BaseModel):
+    """A structured message sent between agents."""
+
+    sender: str = Field(description="The name or role of the sending agent.")
+    receiver: str = Field(description="The name or role of the receiving agent.")
+    message_type: str = Field(description="The type/intent of message, e.g. request_information, share_findings, submit_recommendations.")
+    payload: dict[str, Any] = Field(default_factory=dict, description="The message data payload.")
+    timestamp: float = Field(default_factory=time.time, description="Unix timestamp of when the message was sent.")
 
 
