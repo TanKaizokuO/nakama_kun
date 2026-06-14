@@ -11,6 +11,24 @@ from nakama_kun.orchestration.task_classifier import TaskType
 from nakama_kun.orchestration.verification import VerificationReport
 
 
+def merge_dicts(left: dict[str, Any] | None, right: dict[str, Any] | None) -> dict[str, Any]:
+    """Merge two dictionaries, combining keys. Used as a reducer in AgentState."""
+    left = left or {}
+    right = right or {}
+    return {**left, **right}
+
+
+def merge_lists(left: list[Any] | None, right: list[Any] | None) -> list[Any]:
+    """Merge two lists, preserving order and deduplicating. Used as a reducer in AgentState."""
+    left = left or []
+    right = right or []
+    res = list(left)
+    for x in right:
+        if x not in res:
+            res.append(x)
+    return res
+
+
 class AgentState(TypedDict):
     """The central state maintained throughout the LangGraph agent workflow."""
 
@@ -68,12 +86,12 @@ class AgentState(TypedDict):
     coder_proposals: list[dict[str, Any]]
 
     # Decisions and transitions history of all agents
-    agent_history: list[dict[str, Any]]
+    agent_history: Annotated[list[dict[str, Any]], operator.add]
 
     # Phase 1 Multi-Agent Architecture extensions
     active_agent: str
-    agent_outputs: dict[str, Any]
-    agent_metrics: dict[str, Any]
+    agent_outputs: Annotated[dict[str, Any], merge_dicts]
+    agent_metrics: Annotated[dict[str, Any], merge_dicts]
 
     # Target agent routing for rejection feedback (e.g. 'planner' or 'coder')
     reviewer_route: str | None
@@ -95,7 +113,7 @@ class AgentState(TypedDict):
 
     # Phase 3 Multi-Agent Architecture extensions
     security_report: SecurityReport | None
-    agent_messages: list[AgentMessage]
+    agent_messages: Annotated[list[AgentMessage], operator.add]
 
 
 
