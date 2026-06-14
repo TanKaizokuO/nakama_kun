@@ -16,6 +16,47 @@ from nakama_kun.workspace.context import WorkspaceContextBuilder
 class PlannerAgent(BaseAgent):
     """Planner Agent decomposes goals into discrete tasks and file targets."""
 
+    def __init__(self, chat_service: Any, tool_registry: Any = None) -> None:
+        super().__init__(chat_service)
+        if tool_registry is None:
+            from nakama_kun.tools import build_default_registry
+            self.tool_registry = build_default_registry()
+        else:
+            self.tool_registry = tool_registry
+
+    def _build_tool_capability_summary(self) -> str:
+        summary_lines = ["### Available Tools and Capability Summary\n"]
+        from nakama_kun.tools.discovery import ToolDiscoveryService
+        discovery = ToolDiscoveryService(self.tool_registry)
+
+        local_tools = []
+        mcp_tools = []
+
+        for tool in discovery.list_available_tools():
+            from nakama_kun.tools.adapters import MCPToolAdapter
+            if isinstance(tool, MCPToolAdapter):
+                mcp_tools.append(tool)
+            else:
+                local_tools.append(tool)
+
+        summary_lines.append("#### Local Tools (Workspace & System)")
+        for tool in local_tools:
+            summary_lines.append(f"- **{tool.name}**:")
+            summary_lines.append(f"  * Purpose: {tool.description}")
+            summary_lines.append(f"  * Permissions: {', '.join(tool.permissions) if tool.permissions else 'none'}")
+            summary_lines.append(f"  * Typical Use Cases: {tool.usage_description}")
+
+        summary_lines.append("\n#### External MCP Tools (External Systems)")
+        for tool in mcp_tools:
+            server_name = tool.mcp_tool.server_name if hasattr(tool, "mcp_tool") else "unknown"
+            summary_lines.append(f"- **{tool.name}**:")
+            summary_lines.append(f"  * Purpose: {tool.description}")
+            summary_lines.append(f"  * Permissions: {', '.join(tool.permissions) if tool.permissions else 'none'}")
+            summary_lines.append(f"  * Server: {server_name}")
+            summary_lines.append(f"  * Typical Use Cases: {tool.usage_description}")
+
+        return "\n".join(summary_lines)
+
     async def run(self, state: dict[str, Any]) -> dict[str, Any]:
         logger.info("[PlannerAgent] Starting planning task...")
         goal = state.get("goal", "")
@@ -60,6 +101,12 @@ class PlannerAgent(BaseAgent):
 
         # Build full system prompt
         system_prompt = PLANNER_AGENT_PROMPT
+
+        # Inject Tool Capability Summary
+        tool_summary = self._build_tool_capability_summary()
+        if tool_summary:
+            system_prompt += f"\n\n{tool_summary}"
+
         if workspace_context:
             system_prompt += f"\n\n### Workspace Context\n{workspace_context}"
         if rag_context:
