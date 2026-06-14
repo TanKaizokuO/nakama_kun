@@ -48,19 +48,19 @@ class UnifiedTool(ABC):
     @property
     @abstractmethod
     def permissions(self) -> list[str]:
-        """Permissions required by this tool."""
+        """Permissions required by this tool (e.g. ['filesystem_read'])."""
         ...
 
     @property
     @abstractmethod
     def categories(self) -> list[str]:
-        """Categories this tool belongs to."""
+        """Categories this tool belongs to (e.g. ['filesystem'])."""
         ...
 
     @property
     @abstractmethod
     def usage_description(self) -> str:
-        """Detailed usage description."""
+        """Detailed usage description and typical use cases."""
         ...
 
     @abstractmethod
