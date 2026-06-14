@@ -35,7 +35,14 @@ class ExecutorAgent(BaseAgent):
         tool_registry: ToolRegistry,
         tool_router: ToolRouter,
     ) -> None:
-        super().__init__(chat_service)
+        from nakama_kun.agents.prompts import EXECUTOR_AGENT_PROMPT
+        super().__init__(
+            name="ExecutorAgent",
+            role="coder",
+            system_prompt=EXECUTOR_AGENT_PROMPT,
+            chat_service=chat_service,
+            tools=tool_registry.all_schemas() if tool_registry else [],
+        )
         self.tool_registry = tool_registry
         self.tool_router = tool_router
 

@@ -207,7 +207,7 @@ def test_routing_logic() -> None:
         "final_response": None,
         "status": "reviewing",
     }
-    assert route_after_review(state_rej) == "planner"
+    assert route_after_review(state_rej) == "planner_agent_node"
 
     # Rejected + Retry >= 3 → Final Response (Limit reached)
     state_limit: AgentState = {

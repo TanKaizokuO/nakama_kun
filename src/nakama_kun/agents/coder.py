@@ -23,7 +23,39 @@ from nakama_kun.orchestration.nodes import (
     _render_tool_observation,
     _tool_call_key,
 )
+import re
+from nakama_kun.agents.models import CoderHandoff
 from nakama_kun.tools import ToolRegistry, ToolResult, ToolRouter
+
+
+def parse_coder_handoff(text: str) -> CoderHandoff | None:
+    """Parse a structured CoderHandoff model from JSON text or code blocks."""
+    text_stripped = text.strip()
+    try:
+        data = json.loads(text_stripped)
+        return CoderHandoff.model_validate(data)
+    except Exception:
+        pass
+
+    # Try matching json block ```json ... ```
+    match = re.search(r"```json\s*(.*?)\s*```", text_stripped, re.DOTALL | re.IGNORECASE)
+    if match:
+        try:
+            data = json.loads(match.group(1).strip())
+            return CoderHandoff.model_validate(data)
+        except Exception:
+            pass
+
+    # Try matching general block ``` ... ```
+    match = re.search(r"```\s*(.*?)\s*```", text_stripped, re.DOTALL | re.IGNORECASE)
+    if match:
+        try:
+            data = json.loads(match.group(1).strip())
+            return CoderHandoff.model_validate(data)
+        except Exception:
+            pass
+
+    return None
 
 
 class CoderAgent(BaseAgent):

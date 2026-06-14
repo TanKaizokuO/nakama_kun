@@ -101,32 +101,44 @@ async def test_planner_agent_run(mock_chat_service: MagicMock) -> None:
 
 @pytest.mark.anyio
 async def test_coder_agent_run(mock_chat_service: MagicMock) -> None:
-    agent = CoderAgent(mock_chat_service)
+    registry = MagicMock(spec=ToolRegistry)
+    registry.all_schemas.return_value = []
+    
+    router = MagicMock(spec=ToolRouter)
+    mock_tool_res = MagicMock()
+    mock_tool_res.success = True
+    mock_tool_res.to_content.return_value = "Success"
+    mock_tool_res.error = None
+    router.dispatch.return_value = mock_tool_res
 
-    raw_handoff = '{"proposals": [{"path": "calculator.py", "content": "def add(a, b): return a + b", "explanation": "implement add"}], "notes": "coder notes"}'
-    mock_chat_service.provider.generate.return_value = AIResponse(
-        content=raw_handoff, finish_reason="stop", model="mock-model"
-    )
+    agent = CoderAgent(mock_chat_service, registry, router)
 
-    plan = Plan(
-        goal_summary="Build calculator",
-        targets=["calculator.py"],
-        assumptions=[],
-        ordered_steps=["Write add"],
-        risks=[],
-        validation_checklist=[],
+    mock_tc = ToolCall(
+        id="tc-1",
+        function={"name": "write_file", "arguments": {"path": "calculator.py", "content": "xyz"}},
     )
+    resp_1 = AIResponse(content="Calling write", tool_calls=[mock_tc], finish_reason="tool_calls", model="mock-model")
+    resp_2 = AIResponse(content="Done", tool_calls=[], finish_reason="stop", model="mock-model")
+
+    mock_chat_service.chat_with_tools.side_effect = [resp_1, resp_2]
+
     state: dict[str, Any] = {
         "goal": "Build calculator",
-        "plan": plan,
-        "reviewer_feedback": None,
+        "plan": None,
+        "messages": [],
+        "tool_results": [],
+        "required_artifacts": ["calculator.py"],
+        "created_artifacts": [],
+        "research_budget_remaining": 10,
+        "delivery_mode": False,
         "agent_history": [],
     }
 
     res = await agent.run(state)
-    assert len(res["coder_proposals"]) == 1
-    assert res["coder_proposals"][0]["path"] == "calculator.py"
-    assert res["coder_proposals"][0]["content"] == "def add(a, b): return a + b"
+    assert len(res["tool_results"]) == 1
+    assert res["tool_results"][0]["tool"] == "write_file"
+    assert res["tool_results"][0]["success"] is True
+    assert "calculator.py" in res["created_artifacts"]
     assert len(res["agent_history"]) == 1
     assert res["agent_history"][0]["agent"] == "CoderAgent"
 

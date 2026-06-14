@@ -68,6 +68,14 @@ def route_after_review(state: AgentState) -> str:
     return "coder_agent_node"
 
 
+def route_after_executor(state: AgentState) -> str:
+    """Determine the next node to route to after the Executor."""
+    if state.get("goal_satisfied", False):
+        logger.info("[LangGraph] Goal satisfied early. Routing directly to final response.")
+        return "final_response"
+    return "verifier"
+
+
 def route_after_coder(state: AgentState) -> str:
     """Determine the next node to route to after the Coder."""
     if state.get("goal_satisfied", False):

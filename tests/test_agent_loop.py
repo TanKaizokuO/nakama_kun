@@ -110,7 +110,9 @@ class TestAgentLoop:
             prompt_lower = "".join(m.content or "" for m in user_msgs).lower()
 
             if "reviewer" in content_lower or "reviewer" in prompt_lower:
-                return _make_ai_response(content="[APPROVED] All tasks met.")
+                return _make_ai_response(
+                    content='[APPROVED] ```json\n{"approved": true, "feedback": null, "route_to": null, "bugs": [], "risks": []}\n```'
+                )
             elif "synthesize" in prompt_lower or "synthesize" in content_lower:
                 final_content = "Direct answer."
                 if responses:

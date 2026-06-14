@@ -118,7 +118,7 @@ class BaseAgent(ABC):
         if self.role == "planner":
             plans = []
             for h in history:
-                if h.get("agent") == "PlannerAgent":
+                if h.get("agent") in ("PlannerAgent", self.name):
                     handoff = h.get("handoff")
                     if isinstance(handoff, dict) and "goal_summary" in handoff:
                         plans.append(handoff)
@@ -126,17 +126,17 @@ class BaseAgent(ABC):
         elif self.role == "coder":
             self._memory["implementation_history"] = [
                 h for h in history
-                if h.get("agent") in ("CoderAgent", "ExecutorAgent")
+                if h.get("agent") in ("CoderAgent", "ExecutorAgent", self.name)
             ]
         elif self.role == "verifier":
             self._memory["validation_history"] = [
                 h for h in history
-                if h.get("agent") == "VerifierAgent"
+                if h.get("agent") in ("VerifierAgent", self.name)
             ]
         elif self.role == "reviewer":
             self._memory["review_history"] = [
                 h.get("handoff") for h in history
-                if h.get("agent") == "ReviewerAgent"
+                if h.get("agent") in ("ReviewerAgent", self.name)
             ]
 
         return updates

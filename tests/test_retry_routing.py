@@ -43,7 +43,7 @@ def test_retry_routing_failed_retrieval() -> None:
     }
 
     next_node = route_after_review(state)
-    assert next_node == "planner"
+    assert next_node == "planner_agent_node"
 
     # Increment retry_count to the limit (3)
     state["retry_count"] = 3
