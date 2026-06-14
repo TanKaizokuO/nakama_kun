@@ -440,6 +440,9 @@ async def run_web_agent_flow(websocket: WebSocket, ctx: Any, text: str) -> None:
             "retry_count": 0,
             "final_response": None,
             "status": "planning",
+            "active_agent": "",
+            "agent_outputs": {},
+            "agent_metrics": {},
         }
 
         # Keep socket posted on each step of the LangGraph execution

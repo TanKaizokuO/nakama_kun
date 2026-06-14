@@ -98,7 +98,22 @@ Guidelines for routing rejections:
 class ReviewerAgent(BaseAgent):
     """Reviewer Agent evaluates verification reports to approve or reject tasks."""
 
-    async def run(self, state: dict[str, Any]) -> dict[str, Any]:
+    def __init__(self, chat_service: Any) -> None:
+        from nakama_kun.agents.prompts import REVIEWER_AGENT_PROMPT
+        super().__init__(
+            name="ReviewerAgent",
+            role="reviewer",
+            system_prompt=REVIEWER_AGENT_PROMPT,
+            chat_service=chat_service,
+        )
+        self.memory["review_history"] = []
+
+    @property
+    def review_history(self) -> list[Any]:
+        """Returns the history of reviews performed by the reviewer."""
+        return self.memory.get("review_history", [])
+
+    async def review(self, state: dict[str, Any]) -> dict[str, Any]:
         logger.info("[ReviewerAgent] Starting review task...")
         goal = state["goal"]
         plan = state.get("plan")

@@ -8,12 +8,11 @@ from loguru import logger
 from nakama_kun.ai.services.chat_service import ChatService
 from nakama_kun.ai.services.planner_service import PlannerService
 from nakama_kun.orchestration.nodes import (
-    make_coder_node,
-    make_executor_node,
+    make_coder_agent_node,
     make_final_response_node,
-    make_planner_node,
-    make_reviewer_node,
-    make_verifier_node,
+    make_planner_agent_node,
+    make_reviewer_agent_node,
+    make_verifier_agent_node,
 )
 from nakama_kun.orchestration.state import AgentState
 from nakama_kun.tools import ToolRegistry, ToolRouter
@@ -63,15 +62,18 @@ def route_after_review(state: AgentState) -> str:
     logger.info(
         f"[LangGraph] QA rejected. Routing back to {route.capitalize()} Node (Retry {retry_count + 1}/3)."
     )
-    return route
+    
+    if route == "planner":
+        return "planner_agent_node"
+    return "coder_agent_node"
 
 
-def route_after_executor(state: AgentState) -> str:
-    """Determine the next node to route to after the Executor."""
+def route_after_coder(state: AgentState) -> str:
+    """Determine the next node to route to after the Coder."""
     if state.get("goal_satisfied", False):
         logger.info("[LangGraph] Goal satisfied early. Routing directly to final response.")
         return "final_response"
-    return "verifier"
+    return "verifier_agent_node"
 
 
 def build_agent_graph(
@@ -85,46 +87,42 @@ def build_agent_graph(
     workflow = StateGraph(AgentState)
 
     # 1. Create nodes
-    planner_node: Any = make_planner_node(planner_service)
-    coder_node: Any = make_coder_node(chat_service)
-    executor_node: Any = make_executor_node(chat_service, tool_registry, tool_router)
-    verifier_node: Any = make_verifier_node(workspace_root)
-    reviewer_node: Any = make_reviewer_node(chat_service, workspace_root)
+    planner_agent_node: Any = make_planner_agent_node(chat_service, tool_registry)
+    coder_agent_node: Any = make_coder_agent_node(chat_service, tool_registry, tool_router)
+    verifier_agent_node: Any = make_verifier_agent_node(workspace_root, chat_service)
+    reviewer_agent_node: Any = make_reviewer_agent_node(chat_service, workspace_root)
     final_response_node: Any = make_final_response_node(chat_service)
 
     # 2. Add nodes to graph
-    workflow.add_node("planner", planner_node)
-    workflow.add_node("coder", coder_node)
-    workflow.add_node("executor", executor_node)
-    workflow.add_node("verifier", verifier_node)
-    workflow.add_node("reviewer", reviewer_node)
+    workflow.add_node("planner_agent_node", planner_agent_node)
+    workflow.add_node("coder_agent_node", coder_agent_node)
+    workflow.add_node("verifier_agent_node", verifier_agent_node)
+    workflow.add_node("reviewer_agent_node", reviewer_agent_node)
     workflow.add_node("final_response", final_response_node)
 
     # 3. Define transitions / edges
-    workflow.add_edge(START, "planner")
-    workflow.add_edge("planner", "coder")
-    workflow.add_edge("coder", "executor")
+    workflow.add_edge(START, "planner_agent_node")
+    workflow.add_edge("planner_agent_node", "coder_agent_node")
     
-    # Conditional routing after Executor to skip Verifier/Reviewer if goal is satisfied
+    # Conditional routing after Coder Agent
     workflow.add_conditional_edges(
-        "executor",
-        route_after_executor,
+        "coder_agent_node",
+        route_after_coder,
         {
-            "verifier": "verifier",
+            "verifier_agent_node": "verifier_agent_node",
             "final_response": "final_response",
         },
     )
     
-    # Verifier inspects the real workspace before the Reviewer evaluates results
-    workflow.add_edge("verifier", "reviewer")
+    workflow.add_edge("verifier_agent_node", "reviewer_agent_node")
 
     # Conditional routing after QA Review
     workflow.add_conditional_edges(
-        "reviewer",
+        "reviewer_agent_node",
         route_after_review,
         {
-            "planner": "planner",
-            "coder": "coder",
+            "planner_agent_node": "planner_agent_node",
+            "coder_agent_node": "coder_agent_node",
             "final_response": "final_response",
         },
     )

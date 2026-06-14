@@ -17,12 +17,27 @@ class PlannerAgent(BaseAgent):
     """Planner Agent decomposes goals into discrete tasks and file targets."""
 
     def __init__(self, chat_service: Any, tool_registry: Any = None) -> None:
-        super().__init__(chat_service)
+        from nakama_kun.agents.prompts import PLANNER_AGENT_PROMPT
         if tool_registry is None:
             from nakama_kun.tools import build_default_registry
-            self.tool_registry = build_default_registry()
+            reg = build_default_registry()
         else:
-            self.tool_registry = tool_registry
+            reg = tool_registry
+
+        super().__init__(
+            name="PlannerAgent",
+            role="planner",
+            system_prompt=PLANNER_AGENT_PROMPT,
+            chat_service=chat_service,
+            tools=reg.all_schemas() if reg else [],
+        )
+        self.tool_registry = reg
+        self.memory["successful_plans"] = []
+
+    @property
+    def successful_plans(self) -> list[Any]:
+        """Returns the history of plans that were successfully executed/approved."""
+        return self.memory.get("successful_plans", [])
 
     def _build_tool_capability_summary(self) -> str:
         summary_lines = ["### Available Tools and Capability Summary\n"]
@@ -57,7 +72,7 @@ class PlannerAgent(BaseAgent):
 
         return "\n".join(summary_lines)
 
-    async def run(self, state: dict[str, Any]) -> dict[str, Any]:
+    async def plan(self, state: dict[str, Any]) -> dict[str, Any]:
         logger.info("[PlannerAgent] Starting planning task...")
         goal = state.get("goal", "")
         feedback = state.get("reviewer_feedback")

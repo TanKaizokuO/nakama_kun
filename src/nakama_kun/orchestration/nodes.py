@@ -1323,6 +1323,198 @@ def _build_retrieval_fallback_response(
 
 
 # ---------------------------------------------------------------------------
+# Phase 1 Multi-Agent Node factories
+# ---------------------------------------------------------------------------
+
+
+def make_planner_agent_node(chat_service: ChatService, tool_registry: ToolRegistry) -> Callable[[AgentState], Any]:
+    """Factory creating the Planner Agent Node.
+
+    Planner node decomposes complex goals into steps and plans the execution.
+    """
+    async def planner_agent_node(state: AgentState) -> dict[str, Any]:
+        logger.info("[LangGraph] Planner Agent Node starting...")
+        retry_count = state.get("retry_count", 0)
+        if state.get("reviewer_feedback") and state.get("reviewer_route", "planner") == "planner":
+            retry_count += 1
+            
+        agent_state = dict(state)
+        agent_state["retry_count"] = retry_count
+        
+        if state.get("reviewer_feedback"):
+            completed_actions = []
+            for r in state.get("tool_results", []):
+                if r.get("success", False):
+                    tool_name = r.get("tool", "")
+                    arguments = r.get("arguments", {})
+                    completed_actions.append(f"- Tool '{tool_name}' succeeded with args: {json.dumps(arguments)}")
+
+            previous_failures = []
+            for r in state.get("tool_results", []):
+                if not r.get("success", False):
+                    tool_name = r.get("tool", "")
+                    arguments = r.get("arguments", {})
+                    error = r.get("error") or r.get("content") or ""
+                    content_snippet = error[:200] + "..." if len(error) > 200 else error
+                    previous_failures.append(
+                        f"- Tool '{tool_name}' failed with args: {json.dumps(arguments)}\n"
+                        f"  Output/Error: {content_snippet}"
+                    )
+            failed_validations = []
+            report = state.get("verification_report")
+            if report:
+                all_artifacts = report.files_created + report.files_modified
+                for fa in all_artifacts:
+                    if not fa.exists:
+                        failed_validations.append(f"- Expected file artifact does not exist: {fa.path}")
+                artifact_paths = {fa.path for fa in all_artifacts}
+                for ec in report.existence_checks:
+                    if not ec.exists and ec.path not in artifact_paths:
+                        failed_validations.append(f"- Referenced file does not exist: {ec.path}")
+                for cr in report.command_results:
+                    if not cr.success:
+                        if cr.test_summary:
+                            failed_validations.append(
+                                f"- Test runner command failed: '{cr.cmd}' (Exit code: {cr.exit_code})\n"
+                                f"  Tests: {cr.test_summary.get('passed', 0)} passed, {cr.test_summary.get('failed', 0)} failed, "
+                                f"{cr.test_summary.get('errors', 0)} errors, {cr.test_summary.get('skipped', 0)} skipped"
+                            )
+                        else:
+                            stdout = cr.stdout_snippet or ""
+                            stdout_snippet = stdout[:200] + "..." if len(stdout) > 200 else stdout
+                            failed_validations.append(
+                                f"- Command failed: '{cr.cmd}' (Exit code: {cr.exit_code})\n"
+                                f"  Output:\n{stdout_snippet}"
+                            )
+            required_artifacts = state.get("required_artifacts", [])
+            created_artifacts = state.get("created_artifacts", [])
+            missing_artifacts = _missing_required_artifacts(required_artifacts, created_artifacts)
+            if missing_artifacts:
+                failed_validations.extend(
+                    f"- Missing required artifact: {artifact}"
+                    for artifact in missing_artifacts
+                )
+
+            retry_memory = _build_retry_memory(
+                state,
+                completed_actions=completed_actions,
+                failed_actions=previous_failures,
+                failed_validations=failed_validations,
+                feedback=state.get("reviewer_feedback"),
+            )
+        else:
+            retry_memory = state.get("retry_memory") or _empty_retry_memory()
+
+        agent_state["retry_memory"] = retry_memory
+
+        from nakama_kun.agents.planner import PlannerAgent
+        agent = PlannerAgent(chat_service, tool_registry=tool_registry)
+        res = await agent.run(agent_state)
+
+        res["retry_count"] = retry_count
+        res["retry_memory"] = retry_memory
+        res["research_budget_remaining"] = state.get("research_budget_remaining", RESEARCH_THRESHOLD)
+        res["delivery_mode"] = state.get("delivery_mode", False)
+        res["task_type"] = state.get("task_type") or classify_task(state["goal"])
+        res["goal_satisfied"] = state.get("goal_satisfied", False)
+        return res
+
+    return planner_agent_node
+
+
+def make_coder_agent_node(
+    chat_service: ChatService,
+    tool_registry: ToolRegistry,
+    tool_router: ToolRouter,
+) -> Callable[[AgentState], Any]:
+    """Factory creating the Coder Agent Node.
+
+    Coder Agent runs tool execution loops.
+    """
+    async def coder_agent_node(state: AgentState) -> dict[str, Any]:
+        logger.info("[LangGraph] Coder Agent Node starting...")
+        retry_count = state.get("retry_count", 0)
+        if state.get("reviewer_feedback") and state.get("reviewer_route") == "coder":
+            retry_count += 1
+            
+        agent_state = dict(state)
+        agent_state["retry_count"] = retry_count
+        
+        from nakama_kun.agents.coder import CoderAgent
+        agent = CoderAgent(chat_service, tool_registry, tool_router)
+        res = await agent.run(agent_state)
+        
+        res["retry_count"] = retry_count
+        # Ensure missing_artifacts is computed and returned
+        required_artifacts = state.get("required_artifacts", [])
+        created_artifacts = res.get("created_artifacts", [])
+        res["missing_artifacts"] = _missing_required_artifacts(required_artifacts, created_artifacts)
+        return res
+
+    return coder_agent_node
+
+
+def make_verifier_agent_node(workspace_root: str | None = None, chat_service: Any = None) -> Callable[[AgentState], Any]:
+    """Factory creating the Verifier Agent Node.
+
+    Verifier agent validates implementation and compiles evidence.
+    """
+    async def verifier_agent_node(state: AgentState) -> dict[str, Any]:
+        logger.info("[LangGraph] Verifier Agent Node starting...")
+        from nakama_kun.agents.verifier import VerifierAgent
+        agent = VerifierAgent(workspace_root=workspace_root, chat_service=chat_service)
+        res = await agent.run(dict(state))
+        return res
+
+    return verifier_agent_node
+
+
+def make_reviewer_agent_node(chat_service: ChatService, workspace_root: str | None = None) -> Callable[[AgentState], Any]:
+    """Factory creating the Reviewer Agent Node.
+
+    Reviewer agent evaluates correctness and completion.
+    """
+    async def reviewer_agent_node(state: AgentState) -> dict[str, Any]:
+        logger.info("[LangGraph] Reviewer Agent Node starting...")
+        
+        missing_artifacts = state.get("missing_artifacts", [])
+        if missing_artifacts:
+            feedback = (
+                "[REJECTED]\n"
+                "Missing Required Artifacts:\n"
+                + "\n".join(f"- {artifact}" for artifact in missing_artifacts)
+                + "\n\nTask cannot be marked complete."
+            )
+            logger.info("[LangGraph] QA Review: deterministic required-artifact gate rejected.")
+            history = list(state.get("agent_history", []))
+            history.append({
+                "agent": "ReviewerAgent",
+                "thought": "Rejected due to missing required artifacts.",
+                "handoff": {
+                    "approved": False,
+                    "route_to": "planner",
+                    "feedback": feedback,
+                    "bugs": ["Missing required artifacts"],
+                    "risks": []
+                }
+            })
+            return {
+                "reviewer_feedback": feedback,
+                "reviewer_route": "planner",
+                "status": "planning",
+                "agent_history": history,
+                "messages": [Message(role="assistant", content=f"Reviewer: Rejected. {feedback}")],
+            }
+
+        from nakama_kun.agents.reviewer import ReviewerAgent
+        agent = ReviewerAgent(chat_service)
+        res = await agent.run(dict(state))
+        return res
+
+    return reviewer_agent_node
+
+
+# ---------------------------------------------------------------------------
 # Final Response Node factory
 # ---------------------------------------------------------------------------
 

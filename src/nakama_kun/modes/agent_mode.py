@@ -254,6 +254,9 @@ class AgentMode(BaseMode):
             "final_response": None,
             "status": "planning",
             "goal_satisfied": False,
+            "active_agent": "",
+            "agent_outputs": {},
+            "agent_metrics": {},
         }
 
         # Keep history in-sync
