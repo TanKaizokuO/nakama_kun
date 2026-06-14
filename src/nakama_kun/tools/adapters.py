@@ -41,7 +41,8 @@ class MCPToolAdapter(BaseTool):
     def _parse_metadata(self, key: str) -> list[str] | None:
         val = self._parse_metadata_str(key)
         if val:
-            return [p.strip() for p in val.split(",") if p.strip()]
+            val = val.strip("[]'\"")
+            return [p.strip().strip("'\"") for p in val.split(",") if p.strip()]
         return None
 
     def _parse_metadata_str(self, key: str) -> str | None:
