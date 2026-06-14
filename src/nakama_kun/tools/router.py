@@ -9,12 +9,14 @@ payload shapes never reach this layer — callers pass plain Python values.
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
 from loguru import logger
 
 from nakama_kun.tools.interfaces import ToolResult
 from nakama_kun.tools.registry import ToolRegistry
+from nakama_kun.tools.safety import assert_within_workspace
 
 
 import json
@@ -215,16 +217,46 @@ class ToolRouter:
                 logger.warning(f"RETRIEVAL VIOLATION: {reason}")
                 return ToolResult(success=False, error=reason)
 
-        logger.debug(f"ToolRouter dispatching '{name}' with args={parsed_args}")
+        # Resolve path and workspace_root for diagnostic logging
+        workspace_root = "N/A"
+        if hasattr(tool, "_workspace_root") and tool._workspace_root:
+            workspace_root = str(tool._workspace_root)
+        elif hasattr(tool, "cwd") and tool.cwd:
+            workspace_root = str(tool.cwd)
+
+        resolved_path = "N/A"
+        path_arg = parsed_args.get("path")
+        if path_arg:
+            try:
+                resolved_path = str(assert_within_workspace(path_arg, workspace_root if workspace_root != "N/A" else os.getcwd()))
+            except Exception as e:
+                resolved_path = f"Error resolving path: {e}"
+
+        logger.info(
+            f"Requested tool: {name}\n"
+            f"Resolved tool: {tool.__class__.__name__}\n"
+            f"Arguments: {parsed_args}\n"
+            f"Workspace root: {workspace_root}\n"
+            f"Resolved path: {resolved_path}"
+        )
 
         try:
             result = await tool.execute(**parsed_args)
+            exception_info = "None"
         except Exception as exc:  # noqa: BLE001
             logger.error(f"Tool '{name}' raised an unexpected error: {exc}")
             result = ToolResult(success=False, error=str(exc))
+            exception_info = str(exc)
 
-        logger.debug(
-            f"ToolRouter '{name}' → success={result.success}, "
-            f"output_len={len(result.output or '')}"
+        success_status = "Success" if result.success else "Failure"
+        if not result.success and exception_info == "None":
+            exception_info = result.error or "Unknown error"
+        
+        payload_info = result.output if result.success else "None"
+
+        logger.info(
+            f"Success/Failure: {success_status}\n"
+            f"Exception: {exception_info}\n"
+            f"Return payload: {payload_info}"
         )
         return result

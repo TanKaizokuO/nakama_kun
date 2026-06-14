@@ -26,8 +26,14 @@ def assert_within_workspace(path: str | Path, workspace_root: str | Path) -> Pat
     Raises:
         PathEscapeError: If the resolved path escapes the workspace root.
     """
-    resolved = Path(path).resolve()
     root = Path(workspace_root).resolve()
+
+    # Resolve relative paths relative to workspace_root rather than os.getcwd()
+    target = Path(path)
+    if not target.is_absolute():
+        target = root / target
+
+    resolved = target.resolve()
 
     try:
         resolved.relative_to(root)

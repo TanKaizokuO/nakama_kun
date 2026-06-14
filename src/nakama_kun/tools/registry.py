@@ -34,6 +34,24 @@ class ToolRegistry:
         else:
             server_name = "local"
 
+        # Explicitly protect core built-in tools from shadowing/replacing
+        PROTECTED_BUILTIN_TOOLS = {
+            "read_file",
+            "write_file",
+            "list_files",
+            "search_files",
+            "search_vector_store",
+            "run_command",
+        }
+
+        if tool_name in PROTECTED_BUILTIN_TOOLS and tool_name in self._tools:
+            logger.info(
+                "Duplicate prevention: protected built-in tool '{}' cannot be shadowed or overwritten by server '{}', skipping.",
+                tool_name,
+                server_name,
+            )
+            return
+
         logger.debug(
             "Registering tool '{}' from server '{}'",
             tool_name,
