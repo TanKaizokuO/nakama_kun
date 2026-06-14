@@ -1728,3 +1728,38 @@ def make_final_response_node(chat_service: ChatService) -> Callable[[AgentState]
         return {"final_response": content, "status": "done"}
 
     return final_response_node
+
+
+def make_retriever_agent_node(chat_service: ChatService, workspace_root: str | None = None) -> Callable[[AgentState], Any]:
+    """Factory creating the Retriever Agent Node.
+
+    Retriever Agent performs codebase exploration, RAG search, and dependency analysis.
+    """
+    async def retriever_agent_node(state: AgentState) -> dict[str, Any]:
+        logger.info("[LangGraph] Retriever Agent Node starting...")
+        from nakama_kun.agents.retriever import RetrieverAgent
+        agent = RetrieverAgent(chat_service=chat_service, workspace_root=workspace_root)
+        res = await agent.run(dict(state))
+        return res
+
+    return retriever_agent_node
+
+
+def make_test_agent_node(
+    chat_service: ChatService,
+    tool_registry: ToolRegistry,
+    tool_router: ToolRouter,
+) -> Callable[[AgentState], Any]:
+    """Factory creating the Test Agent Node.
+
+    Test Agent writes tests, executes tests, and performs repair loops.
+    """
+    async def test_agent_node(state: AgentState) -> dict[str, Any]:
+        logger.info("[LangGraph] Test Agent Node starting...")
+        from nakama_kun.agents.test_agent import TestAgent
+        agent = TestAgent(chat_service=chat_service, tool_registry=tool_registry, tool_router=tool_router)
+        res = await agent.run(dict(state))
+        return res
+
+    return test_agent_node
+

@@ -443,6 +443,8 @@ async def run_web_agent_flow(websocket: WebSocket, ctx: Any, text: str) -> None:
             "active_agent": "",
             "agent_outputs": {},
             "agent_metrics": {},
+            "retrieval_package": None,
+            "test_report": None,
         }
 
         # Keep socket posted on each step of the LangGraph execution

@@ -257,6 +257,8 @@ class AgentMode(BaseMode):
             "active_agent": "",
             "agent_outputs": {},
             "agent_metrics": {},
+            "retrieval_package": None,
+            "test_report": None,
         }
 
         # Keep history in-sync

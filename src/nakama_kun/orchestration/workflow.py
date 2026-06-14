@@ -13,6 +13,8 @@ from nakama_kun.orchestration.nodes import (
     make_planner_agent_node,
     make_reviewer_agent_node,
     make_verifier_agent_node,
+    make_retriever_agent_node,
+    make_test_agent_node,
 )
 from nakama_kun.orchestration.state import AgentState
 from nakama_kun.tools import ToolRegistry, ToolRouter
@@ -81,7 +83,7 @@ def route_after_coder(state: AgentState) -> str:
     if state.get("goal_satisfied", False):
         logger.info("[LangGraph] Goal satisfied early. Routing directly to final response.")
         return "final_response"
-    return "verifier_agent_node"
+    return "test_agent_node"
 
 
 def build_agent_graph(
@@ -96,32 +98,38 @@ def build_agent_graph(
 
     # 1. Create nodes
     planner_agent_node: Any = make_planner_agent_node(chat_service, tool_registry)
+    retriever_agent_node: Any = make_retriever_agent_node(chat_service, workspace_root)
     coder_agent_node: Any = make_coder_agent_node(chat_service, tool_registry, tool_router)
+    test_agent_node: Any = make_test_agent_node(chat_service, tool_registry, tool_router)
     verifier_agent_node: Any = make_verifier_agent_node(workspace_root, chat_service)
     reviewer_agent_node: Any = make_reviewer_agent_node(chat_service, workspace_root)
     final_response_node: Any = make_final_response_node(chat_service)
 
     # 2. Add nodes to graph
     workflow.add_node("planner_agent_node", planner_agent_node)
+    workflow.add_node("retriever_agent_node", retriever_agent_node)
     workflow.add_node("coder_agent_node", coder_agent_node)
+    workflow.add_node("test_agent_node", test_agent_node)
     workflow.add_node("verifier_agent_node", verifier_agent_node)
     workflow.add_node("reviewer_agent_node", reviewer_agent_node)
     workflow.add_node("final_response", final_response_node)
 
     # 3. Define transitions / edges
     workflow.add_edge(START, "planner_agent_node")
-    workflow.add_edge("planner_agent_node", "coder_agent_node")
+    workflow.add_edge("planner_agent_node", "retriever_agent_node")
+    workflow.add_edge("retriever_agent_node", "coder_agent_node")
     
     # Conditional routing after Coder Agent
     workflow.add_conditional_edges(
         "coder_agent_node",
         route_after_coder,
         {
-            "verifier_agent_node": "verifier_agent_node",
+            "test_agent_node": "test_agent_node",
             "final_response": "final_response",
         },
     )
     
+    workflow.add_edge("test_agent_node", "verifier_agent_node")
     workflow.add_edge("verifier_agent_node", "reviewer_agent_node")
 
     # Conditional routing after QA Review
