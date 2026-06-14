@@ -33,7 +33,7 @@ class PlannerAgent(BaseAgent):
         retriever = get_retriever()
         if retriever is not None:
             try:
-                rag_context = retriever.retrieve_formatted_context(goal)
+                rag_context = retriever.retrieve_planner_context(goal)
             except Exception as e:
                 logger.warning(f"Failed to retrieve RAG context: {e}")
 
@@ -63,7 +63,7 @@ class PlannerAgent(BaseAgent):
         if workspace_context:
             system_prompt += f"\n\n### Workspace Context\n{workspace_context}"
         if rag_context:
-            system_prompt += f"\n\n### Retrieved Codebase Context\n{rag_context}"
+            system_prompt += f"\n\n{rag_context}"
         if experience_context:
             system_prompt += f"\n\n### Past Experiences\n{experience_context}"
         if hints:

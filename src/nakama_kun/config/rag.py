@@ -19,7 +19,7 @@ class RAGSettings(BaseSettings):
         default=True, validation_alias="RAG_ENABLED"
     )
     rag_db_path: str = Field(
-        default=".nakama_rag", validation_alias="RAG_DB_PATH"
+        default=".rag", validation_alias="RAG_DB_PATH"
     )
     rag_embedding_provider: str = Field(
         default="local", validation_alias="RAG_EMBEDDING_PROVIDER"

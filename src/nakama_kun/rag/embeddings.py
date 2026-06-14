@@ -128,3 +128,58 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         if not res:
             raise ValueError("Empty response received from embedding provider")
         return res[0]
+
+
+class BGEM3EmbeddingProvider(EmbeddingProvider):
+    """Local embedding provider utilizing the BGE-M3 model via sentence-transformers or falling back to a deterministic hashing vectorizer of dimension 1024."""
+
+    def __init__(self, use_fallback: bool = False) -> None:
+        self.dimension = 1024
+        self._model = None
+        self._use_fallback = use_fallback
+
+        if not self._use_fallback:
+            try:
+                from sentence_transformers import SentenceTransformer
+                self._model = SentenceTransformer("BAAI/bge-m3")
+            except Exception:
+                from loguru import logger
+                logger.warning("sentence-transformers not installed or BGE-M3 model failed to load locally. Falling back to deterministic hashing vectorizer (dimension 1024).")
+                self._use_fallback = True
+
+    def _hash_embed(self, text: str) -> list[float]:
+        """Generate a deterministic, process-independent unit vector for a text."""
+        import re
+        normalized = re.sub(r"[^a-zA-Z0-9\s]", " ", text)
+        words = normalized.lower().split()
+        if not words:
+            vec = [0.0] * self.dimension
+            vec[0] = 1.0
+            return vec
+
+        vec = [0.0] * self.dimension
+        for word in words:
+            h = hashlib.md5(word.encode("utf-8")).digest()
+            idx = int.from_bytes(h, "big") % self.dimension
+            vec[idx] += 1.0
+
+        square_sum = sum(val * val for val in vec)
+        l2_norm = math.sqrt(square_sum)
+
+        if l2_norm < 1e-9:
+            vec[0] = 1.0
+            return vec
+
+        return [val / l2_norm for val in vec]
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        if self._use_fallback or self._model is None:
+            return [self._hash_embed(text) for text in texts]
+        try:
+            embeddings = self._model.encode(texts, normalize_embeddings=True)
+            return [emb.tolist() for emb in embeddings]
+        except Exception:
+            return [self._hash_embed(text) for text in texts]
+
+    def embed_query(self, text: str) -> list[float]:
+        return self.embed_documents([text])[0]

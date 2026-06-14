@@ -25,7 +25,9 @@ from nakama_kun.tools.exceptions import (
     ToolError,
     UnknownToolError,
 )
-from nakama_kun.tools.interfaces import BaseTool, ToolResult
+from nakama_kun.tools.interfaces import BaseTool, ToolResult, UnifiedTool
+from nakama_kun.tools.adapters import MCPToolAdapter
+from nakama_kun.tools.discovery import ToolDiscoveryService
 from nakama_kun.tools.registry import ToolRegistry
 from nakama_kun.tools.router import ToolRouter
 from nakama_kun.tools.safety import assert_within_workspace
@@ -72,6 +74,9 @@ __all__ = [
     "build_default_registry",
     # classes
     "BaseTool",
+    "UnifiedTool",
+    "MCPToolAdapter",
+    "ToolDiscoveryService",
     "ToolResult",
     "ToolRegistry",
     "ToolRouter",

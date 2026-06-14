@@ -7,6 +7,7 @@ from nakama_kun.rag.embeddings import (
     EmbeddingProvider,
     LocalEmbeddingProvider,
     OpenAIEmbeddingProvider,
+    BGEM3EmbeddingProvider,
 )
 from nakama_kun.rag.indexer import Indexer
 from nakama_kun.rag.retriever import Retriever
@@ -33,15 +34,15 @@ def get_embedding_provider(settings: RAGSettings) -> EmbeddingProvider:
 
         if not api_key:
             from loguru import logger
-            logger.warning("RAG embedding API key not found. Falling back to local embedding provider.")
-            return LocalEmbeddingProvider()
+            logger.warning("RAG embedding API key not found. Falling back to local BGEM3 embedding provider.")
+            return BGEM3EmbeddingProvider()
 
         return OpenAIEmbeddingProvider(
             api_key=api_key,
             base_url=base_url,
             model=settings.rag_embedding_model,
         )
-    return LocalEmbeddingProvider()
+    return BGEM3EmbeddingProvider()
 
 
 def get_vector_store(workspace_root: str | None = None) -> VectorStore | None:
@@ -107,6 +108,7 @@ __all__ = [
     "EmbeddingProvider",
     "LocalEmbeddingProvider",
     "OpenAIEmbeddingProvider",
+    "BGEM3EmbeddingProvider",
     "DocumentChunk",
     "VectorStore",
     "ChromaVectorStore",

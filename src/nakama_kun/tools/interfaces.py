@@ -11,7 +11,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ToolResult(BaseModel):
@@ -20,6 +20,7 @@ class ToolResult(BaseModel):
     success: bool
     output: str | None = None
     error: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     def to_content(self) -> str:
         """Render the result as a plain-text tool-result message content."""
@@ -32,7 +33,43 @@ class ToolResult(BaseModel):
         return content
 
 
-class BaseTool(ABC):
+class UnifiedTool(ABC):
+    """Abstract base representing any tool (local or MCP) that can be queried and executed."""
+
+    name: str
+    description: str
+
+    @property
+    @abstractmethod
+    def schema(self) -> dict[str, Any]:
+        """OpenAI-compatible function schema representation."""
+        ...
+
+    @property
+    @abstractmethod
+    def permissions(self) -> list[str]:
+        """Permissions required by this tool."""
+        ...
+
+    @property
+    @abstractmethod
+    def categories(self) -> list[str]:
+        """Categories this tool belongs to."""
+        ...
+
+    @property
+    @abstractmethod
+    def usage_description(self) -> str:
+        """Detailed usage description."""
+        ...
+
+    @abstractmethod
+    async def execute(self, **kwargs: Any) -> ToolResult:
+        """Run the tool with keyword arguments and return a standardized ToolResult."""
+        ...
+
+
+class BaseTool(UnifiedTool, ABC):
     """Abstract base class every nakama_kun tool must implement.
 
     Subclasses declare:
@@ -45,14 +82,27 @@ class BaseTool(ABC):
     and return a ``ToolResult(success=False, error=...)`` instead.
     """
 
-    name: str
-    description: str
     parameters: dict[str, Any]
 
-    @abstractmethod
-    async def execute(self, **kwargs: Any) -> ToolResult:
-        """Run the tool and return a structured result."""
-        ...
+    @property
+    def permissions(self) -> list[str]:
+        """Permissions required by this tool."""
+        return []
+
+    @property
+    def categories(self) -> list[str]:
+        """Categories this tool belongs to."""
+        return []
+
+    @property
+    def usage_description(self) -> str:
+        """Detailed usage description."""
+        return self.description
+
+    @property
+    def schema(self) -> dict[str, Any]:
+        """Return the tool parameters schema."""
+        return self.parameters
 
     def to_schema(self) -> dict[str, Any]:
         """Return an OpenAI function-tool dict for the provider ``tools=`` list."""

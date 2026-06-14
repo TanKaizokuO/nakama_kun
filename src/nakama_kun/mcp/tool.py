@@ -51,6 +51,42 @@ class MCPTool(BaseTool):
         self.parameters = parameters
         self.approval_provider = approval_provider
 
+    @property
+    def server_name(self) -> str:
+        """The name of the parent MCP server."""
+        return self.client.name
+
+    @property
+    def schema(self) -> dict[str, Any]:
+        """The tool's parameters schema."""
+        return self.parameters
+
+    @property
+    def permissions(self) -> list[str]:  # type: ignore[override]
+        return self._parse_metadata("Permissions") or [f"{self.server_name}_access"]
+
+    @property
+    def categories(self) -> list[str]:  # type: ignore[override]
+        return self._parse_metadata("Categories") or [self.server_name]
+
+    @property
+    def usage_description(self) -> str:  # type: ignore[override]
+        return self._parse_metadata_str("Usage") or self.description
+
+    def _parse_metadata(self, key: str) -> list[str] | None:
+        val = self._parse_metadata_str(key)
+        if val:
+            return [p.strip() for p in val.split(",") if p.strip()]
+        return None
+
+    def _parse_metadata_str(self, key: str) -> str | None:
+        import re
+        pattern = rf"(?i)\b{key}\s*:\s*(.+)"
+        match = re.search(pattern, self.description)
+        if match:
+            return match.group(1).split("\n")[0].strip()
+        return None
+
     async def execute(self, **kwargs: Any) -> ToolResult:
         # 1. Enforce safety gating for mutating actions
         if is_mutating_tool(self.original_name) or is_mutating_tool(self.name):

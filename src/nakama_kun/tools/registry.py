@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from nakama_kun.mcp.registry import MCPRegistry
+from nakama_kun.tools.adapters import MCPToolAdapter
 from nakama_kun.tools.exceptions import UnknownToolError
 from nakama_kun.tools.interfaces import BaseTool
 
@@ -30,21 +32,31 @@ class ToolRegistry:
         Raises:
             UnknownToolError: If no tool with *name* is registered.
         """
-        try:
+        if name in self._tools:
             return self._tools[name]
-        except KeyError:
-            raise UnknownToolError(
-                f"No tool named '{name}' is registered. "
-                f"Available: {sorted(self._tools)}"
-            ) from None
+
+        # Look in MCP registry
+        mcp_tool = MCPRegistry.get_instance().find_tool(name)
+        if mcp_tool is not None:
+            return MCPToolAdapter(mcp_tool)
+
+        raise UnknownToolError(
+            f"No tool named '{name}' is registered. "
+            f"Available: {self.names()}"
+        )
 
     def all_schemas(self) -> list[dict[str, Any]]:
         """Return a list of OpenAI-compatible tool schemas for all registered tools."""
-        return [tool.to_schema() for tool in self._tools.values()]
+        schemas = [tool.to_schema() for tool in self._tools.values()]
+        for mcp_tool in MCPRegistry.get_instance().list_tools():
+            adapter = MCPToolAdapter(mcp_tool)
+            schemas.append(adapter.to_schema())
+        return schemas
 
     def names(self) -> list[str]:
         """Return the sorted names of all registered tools."""
-        return sorted(self._tools)
+        mcp_names = [t.name for t in MCPRegistry.get_instance().list_tools()]
+        return sorted(list(self._tools.keys()) + mcp_names)
 
     def __len__(self) -> int:
-        return len(self._tools)
+        return len(self._tools) + len(MCPRegistry.get_instance().list_tools())

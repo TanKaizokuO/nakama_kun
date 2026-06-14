@@ -14,8 +14,19 @@ from nakama_kun.rag.embeddings import EmbeddingProvider
 class DocumentChunk:
     """Represents a text chunk of a workspace file or task context with metadata."""
     id: str
+    source_type: str
+    source_path: str
     content: str
     metadata: dict[str, Any]
+
+
+@dataclass
+class IndexedDocument:
+    """Represents a document (file or virtual resource) tracked by the indexer."""
+    path: str
+    type: str
+    chunk_count: int
+    indexed_at: str
 
 
 class ChromaEmbeddingWrapper(EmbeddingFunction[Documents]):
@@ -88,7 +99,12 @@ class ChromaVectorStore(VectorStore):
 
         ids = [chunk.id for chunk in chunks]
         documents = [chunk.content for chunk in chunks]
-        metadatas = [chunk.metadata for chunk in chunks]
+        metadatas = []
+        for chunk in chunks:
+            meta = chunk.metadata.copy()
+            meta["source_type"] = chunk.source_type
+            meta["source_path"] = chunk.source_path
+            metadatas.append(meta)
 
         # Use upsert to handle updates cleanly
         self.collection.upsert(
@@ -124,9 +140,13 @@ class ChromaVectorStore(VectorStore):
             for i in range(len(ids)):
                 doc_content = documents[i] if i < len(documents) else ""
                 doc_meta = metadatas[i] if i < len(metadatas) else {}
+                source_type = doc_meta.get("source_type", "file")
+                source_path = doc_meta.get("source_path", doc_meta.get("path", ""))
                 chunks.append(
                     DocumentChunk(
                         id=ids[i],
+                        source_type=source_type,
+                        source_path=source_path,
                         content=doc_content,
                         metadata=doc_meta,  # type: ignore
                     )
