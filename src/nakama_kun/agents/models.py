@@ -71,3 +71,46 @@ def parse_retrieval_package(text: str) -> RetrievalPackage | None:
 
     return None
 
+
+class TestExecutionReport(BaseModel):
+    """The structured state representing test execution results and recommendations."""
+
+    passed: int = Field(description="Number of passed tests.")
+    failed: int = Field(description="Number of failed tests.")
+    skipped: int = Field(description="Number of skipped tests.")
+    errors: int = Field(description="Number of error tests.")
+    recommendations: list[str] = Field(default_factory=list, description="Recommendations for implementation/test repairs.")
+
+
+def parse_test_report(text: str) -> TestExecutionReport | None:
+    """Parse a structured TestExecutionReport model from JSON text or code blocks."""
+    import json
+    import re
+    text_stripped = text.strip()
+    try:
+        data = json.loads(text_stripped)
+        return TestExecutionReport.model_validate(data)
+    except Exception:
+        pass
+
+    # Try matching json block ```json ... ```
+    match = re.search(r"```json\s*(.*?)\s*```", text_stripped, re.DOTALL | re.IGNORECASE)
+    if match:
+        try:
+            data = json.loads(match.group(1).strip())
+            return TestExecutionReport.model_validate(data)
+        except Exception:
+            pass
+
+    # Try matching general block ``` ... ```
+    match = re.search(r"```\s*(.*?)\s*```", text_stripped, re.DOTALL | re.IGNORECASE)
+    if match:
+        try:
+            data = json.loads(match.group(1).strip())
+            return TestExecutionReport.model_validate(data)
+        except Exception:
+            pass
+
+    return None
+
+
