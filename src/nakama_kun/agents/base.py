@@ -76,7 +76,7 @@ class BaseAgent(ABC):
             updates = await self.execute(state)
         elif self.role == "coder":
             updates = await self.execute(state)
-        elif self.role in ("verifier", "tester"):
+        elif self.role in ("verifier", "tester", "security"):
             updates = await self.execute(state)
         elif self.role == "reviewer":
             updates = await self.review(state)
@@ -102,6 +102,8 @@ class BaseAgent(ABC):
             }
         elif self.role == "tester":
             outputs[self.name] = updates.get("test_report")
+        elif self.role == "security":
+            outputs[self.name] = updates.get("security_report")
         elif self.role == "verifier":
             outputs[self.name] = updates.get("verification_report")
         elif self.role == "reviewer":
@@ -139,10 +141,10 @@ class BaseAgent(ABC):
                 h for h in history
                 if h.get("agent") in ("CoderAgent", "ExecutorAgent", self.name)
             ]
-        elif self.role in ("verifier", "tester"):
+        elif self.role in ("verifier", "tester", "security"):
             self._memory["validation_history"] = [
                 h for h in history
-                if h.get("agent") in ("VerifierAgent", "TestAgent", self.name)
+                if h.get("agent") in ("VerifierAgent", "TestAgent", "SecurityAgent", self.name)
             ]
         elif self.role == "reviewer":
             self._memory["review_history"] = [

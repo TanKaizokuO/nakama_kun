@@ -142,6 +142,31 @@ class TestingEvidence:
         }
 
 
+class SecurityEvidence:
+    """Preserves security review findings, warnings, vulnerabilities, and remediation suggestions."""
+    __slots__ = ("warnings", "vulnerabilities", "blocked_actions", "remediation_suggestions")
+
+    def __init__(
+        self,
+        warnings: list[str],
+        vulnerabilities: list[str],
+        blocked_actions: list[str],
+        remediation_suggestions: list[str],
+    ) -> None:
+        self.warnings = warnings
+        self.vulnerabilities = vulnerabilities
+        self.blocked_actions = blocked_actions
+        self.remediation_suggestions = remediation_suggestions
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "warnings": self.warnings,
+            "vulnerabilities": self.vulnerabilities,
+            "blocked_actions": self.blocked_actions,
+            "remediation_suggestions": self.remediation_suggestions,
+        }
+
+
 class EvidenceStore:
     """A persistent registry preserving execution and validation evidence."""
 
@@ -152,6 +177,7 @@ class EvidenceStore:
         self.test_outputs: list[TestOutputEvidence] = []
         self.retrieval_evidence: list[RetrievalEvidence] = []
         self.testing_evidence: list[TestingEvidence] = []
+        self.security_evidence: list[SecurityEvidence] = []
 
     def add_tool_output(self, tool: str, arguments: dict[str, Any], success: bool, output: str) -> None:
         self.tool_outputs.append(ToolOutputEvidence(tool, arguments, success, output))
@@ -198,6 +224,17 @@ class EvidenceStore:
             TestingEvidence(passed, failed, skipped, errors, recommendations)
         )
 
+    def add_security_evidence(
+        self,
+        warnings: list[str],
+        vulnerabilities: list[str],
+        blocked_actions: list[str],
+        remediation_suggestions: list[str],
+    ) -> None:
+        self.security_evidence.append(
+            SecurityEvidence(warnings, vulnerabilities, blocked_actions, remediation_suggestions)
+        )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "tool_outputs": [t.to_dict() for t in self.tool_outputs],
@@ -206,6 +243,7 @@ class EvidenceStore:
             "test_outputs": [t.to_dict() for t in self.test_outputs],
             "retrieval_evidence": [r.to_dict() for r in self.retrieval_evidence],
             "testing_evidence": [t.to_dict() for t in self.testing_evidence],
+            "security_evidence": [s.to_dict() for s in self.security_evidence],
         }
 
 
@@ -359,6 +397,24 @@ def build_evidence_store(
                 skipped=test_report.get("skipped", 0),
                 errors=test_report.get("errors", 0),
                 recommendations=test_report.get("recommendations", []),
+            )
+
+    # 5. Process security_report
+    security_report = state.get("security_report")
+    if security_report:
+        if hasattr(security_report, "warnings"):
+            store.add_security_evidence(
+                warnings=security_report.warnings,
+                vulnerabilities=security_report.vulnerabilities,
+                blocked_actions=security_report.blocked_actions,
+                remediation_suggestions=security_report.remediation_suggestions,
+            )
+        elif isinstance(security_report, dict):
+            store.add_security_evidence(
+                warnings=security_report.get("warnings", []),
+                vulnerabilities=security_report.get("vulnerabilities", []),
+                blocked_actions=security_report.get("blocked_actions", []),
+                remediation_suggestions=security_report.get("remediation_suggestions", []),
             )
 
     return store

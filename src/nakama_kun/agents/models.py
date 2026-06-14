@@ -114,3 +114,44 @@ def parse_test_report(text: str) -> TestExecutionReport | None:
     return None
 
 
+class SecurityReport(BaseModel):
+    """The structured state representing a code/command security review."""
+
+    warnings: list[str] = Field(default_factory=list, description="List of general security warnings/risks.")
+    vulnerabilities: list[str] = Field(default_factory=list, description="Identified security vulnerabilities (e.g. hardcoded secrets).")
+    blocked_actions: list[str] = Field(default_factory=list, description="Unsafe actions or commands that should be blocked.")
+    remediation_suggestions: list[str] = Field(default_factory=list, description="Suggestions for fixing identified security issues.")
+
+
+def parse_security_report(text: str) -> SecurityReport | None:
+    """Parse a structured SecurityReport model from JSON text or code blocks."""
+    import json
+    import re
+    text_stripped = text.strip()
+    try:
+        data = json.loads(text_stripped)
+        return SecurityReport.model_validate(data)
+    except Exception:
+        pass
+
+    # Try matching json block ```json ... ```
+    match = re.search(r"```json\s*(.*?)\s*```", text_stripped, re.DOTALL | re.IGNORECASE)
+    if match:
+        try:
+            data = json.loads(match.group(1).strip())
+            return SecurityReport.model_validate(data)
+        except Exception:
+            pass
+
+    # Try matching general block ``` ... ```
+    match = re.search(r"```\s*(.*?)\s*```", text_stripped, re.DOTALL | re.IGNORECASE)
+    if match:
+        try:
+            data = json.loads(match.group(1).strip())
+            return SecurityReport.model_validate(data)
+        except Exception:
+            pass
+
+    return None
+
+
