@@ -24,6 +24,7 @@ class MCPManager:
         self.settings = MCPSettings()
         self.clients: dict[str, MCPClient] = {}
         self.registry = MCPRegistry.get_instance()
+        self._tools_loaded: set[str] = set()
 
     async def connect_all(self) -> None:
         """Connects to all configured MCP servers asynchronously.
@@ -36,17 +37,9 @@ class MCPManager:
             logger.info("No MCP servers configured or found.")
             return
 
-        built_ins = {
-            "read_file",
-            "write_file",
-            "list_files",
-            "search_files",
-            "search_vector_store",
-            "run_command",
-        }
-        seen_names = set(built_ins)
-
         for name, cfg in configs.items():
+            if name in self._tools_loaded:
+                continue
             # 1. Register server in STARTING state
             server = MCPServer(
                 name=name,
@@ -69,6 +62,8 @@ class MCPManager:
             try:
                 await client.connect()
                 server.status = MCPServerStatus.CONNECTED
+                # Discover server tools
+                await self.discover_server_tools(name)
             except Exception as e:
                 logger.error(f"Failed to start optional MCP server '{name}': {e}")
                 server.status = MCPServerStatus.ERROR
@@ -76,63 +71,102 @@ class MCPManager:
                     del self.clients[name]
                 continue
 
-            try:
-                # Retrieve capabilities
-                caps: dict[str, Any] = {}
-                if client.session is not None and hasattr(client.session, "initialize_result") and client.session.initialize_result:
-                    init_res = client.session.initialize_result
-                    if hasattr(init_res, "capabilities"):
-                        caps = getattr(init_res.capabilities, "model_dump", lambda: {})() or {}
-                server.capabilities = caps
+    async def discover_server_tools(self, name: str) -> None:
+        """Discover and register tools for a specific connected server if not already loaded."""
+        if name in self._tools_loaded:
+            return
 
-                # Discover and register tools
-                tools = await client.list_tools()
-                logger.debug(
-                    "Discovered {} tools from '{}'",
-                    len(tools),
-                    name,
-                )
-                mcp_tools = []
-                for t in tools:
-                    orig_name = t.name
-                    target_name = orig_name
+        client = self.clients.get(name)
+        if not client:
+            return
 
-                    # Resolve name conflicts
-                    if target_name in seen_names:
-                        target_name = f"mcp_{name}_{orig_name}"
-                        logger.warning(
-                            f"Tool name conflict: '{orig_name}' from server '{name}' "
-                            f"already exists. Renamed to '{target_name}'."
-                        )
-                    seen_names.add(target_name)
+        server = self.registry.get_server(name)
+        if not server:
+            server = MCPServer(
+                name=name,
+                status=MCPServerStatus.CONNECTED,
+                capabilities={},
+                tools=[]
+            )
+            self.registry.register_server(server)
 
-                    description = t.description or f"MCP tool from server '{name}'"
-                    schema = t.inputSchema
-                    if not isinstance(schema, dict):
-                        schema = {"type": "object", "properties": {}}
+        # Retrieve capabilities
+        caps: dict[str, Any] = {}
+        session = getattr(client, "session", None)
+        if session is not None and hasattr(session, "initialize_result") and session.initialize_result:
+            init_res = session.initialize_result
+            if hasattr(init_res, "capabilities"):
+                caps = getattr(init_res.capabilities, "model_dump", lambda: {})() or {}
+        server.capabilities = caps
 
-                    mcp_tool = MCPTool(
-                        client=client,
-                        original_name=orig_name,
-                        name=target_name,
-                        description=description,
-                        parameters=schema,
-                        approval_provider=self.approval_provider,
+        try:
+            # Discover and register tools
+            tools = await client.list_tools()
+            logger.debug(
+                "Discovered {} tools from '{}'",
+                len(tools),
+                name,
+            )
+
+            built_ins = {
+                "read_file",
+                "write_file",
+                "list_files",
+                "search_files",
+                "search_vector_store",
+                "run_command",
+            }
+            seen_names = set(built_ins)
+            for loaded_name in self._tools_loaded:
+                s = self.registry.get_server(loaded_name)
+                if s:
+                    for t in s.tools:
+                        seen_names.add(t.name)
+
+            mcp_tools = []
+            for t in tools:
+                orig_name = t.name
+                target_name = orig_name
+
+                # Resolve name conflicts
+                if target_name in seen_names:
+                    target_name = f"mcp_{name}_{orig_name}"
+                    logger.warning(
+                        f"Tool name conflict: '{orig_name}' from server '{name}' "
+                        f"already exists. Renamed to '{target_name}'."
                     )
-                    mcp_tools.append(mcp_tool)
+                seen_names.add(target_name)
 
-                server.tools = mcp_tools
+                description = t.description or f"MCP tool from server '{name}'"
+                schema = t.inputSchema
+                if not isinstance(schema, dict):
+                    schema = {"type": "object", "properties": {}}
 
-            except Exception as e:
-                logger.error(f"Failed to discover tools for connected MCP server '{name}': {e}")
+                mcp_tool = MCPTool(
+                    client=client,
+                    original_name=orig_name,
+                    name=target_name,
+                    description=description,
+                    parameters=schema,
+                    approval_provider=self.approval_provider,
+                )
+                mcp_tools.append(mcp_tool)
+
+            server.tools = mcp_tools
+            self._tools_loaded.add(name)
+
+        except Exception as e:
+            logger.error(f"Failed to discover tools for connected MCP server '{name}': {e}")
 
     async def get_tools(self) -> list[MCPTool]:
         """Discovers tools from all connected MCP servers and returns mapped MCPTool instances."""
-        await self.health_check()
+        for name in list(self.clients.keys()):
+            await self.discover_server_tools(name)
         return self.registry.list_tools()
 
     async def disconnect_all(self) -> None:
         """Gracefully disconnects all running MCP servers."""
+        self._tools_loaded.clear()
         if not self.clients:
             return
 
@@ -151,17 +185,7 @@ class MCPManager:
         self.clients.clear()
 
     async def health_check(self) -> None:
-        """Verify server connections, listing tools to check integrity and sync tools."""
-        built_ins = {
-            "read_file",
-            "write_file",
-            "list_files",
-            "search_files",
-            "search_vector_store",
-            "run_command",
-        }
-        seen_names = set(built_ins)
-
+        """Verify server connections, listing tools to check integrity (read-only)."""
         from unittest.mock import Mock
 
         for name, client in self.clients.items():
@@ -179,10 +203,10 @@ class MCPManager:
                 session = getattr(client, "session", None)
                 if session is None and not isinstance(client, Mock):
                     server.status = MCPServerStatus.DISCONNECTED
-                    server.tools = []
                     continue
 
-                tools = await client.list_tools()
+                # Responsiveness check: call list_tools but do NOT mutate registry/tools
+                await client.list_tools()
                 server.status = MCPServerStatus.CONNECTED
 
                 # Retrieve capabilities
@@ -193,34 +217,6 @@ class MCPManager:
                     if hasattr(init_res, "capabilities"):
                         caps = getattr(init_res.capabilities, "model_dump", lambda: {})() or {}
                 server.capabilities = caps
-
-                # Sync tools list
-                mcp_tools = []
-                for t in tools:
-                    orig_name = t.name
-                    target_name = orig_name
-
-                    if target_name in seen_names:
-                        target_name = f"mcp_{name}_{orig_name}"
-                        logger.warning(f"Tool name conflict: '{orig_name}' renamed to '{target_name}'")
-                    seen_names.add(target_name)
-
-                    description = t.description or f"MCP tool from server '{name}'"
-                    schema = t.inputSchema
-                    if not isinstance(schema, dict):
-                        schema = {"type": "object", "properties": {}}
-
-                    mcp_tool = MCPTool(
-                        client=client,
-                        original_name=orig_name,
-                        name=target_name,
-                        description=description,
-                        parameters=schema,
-                        approval_provider=self.approval_provider,
-                    )
-                    mcp_tools.append(mcp_tool)
-
-                server.tools = mcp_tools
 
             except Exception as e:
                 logger.warning(f"Health check failed for server '{name}': {e}")
