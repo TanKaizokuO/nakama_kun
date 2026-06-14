@@ -41,7 +41,8 @@ class ToolRegistry:
         )
 
         before = len(self)
-        self._tools[tool_name] = tool
+        if tool_name not in self._tools:
+            self._tools[tool_name] = tool
         after = len(self)
 
         logger.debug(
@@ -71,16 +72,18 @@ class ToolRegistry:
 
     def all_schemas(self) -> list[dict[str, Any]]:
         """Return a list of OpenAI-compatible tool schemas for all registered tools."""
-        schemas = [tool.to_schema() for tool in self._tools.values()]
+        schemas = {tool.name: tool.to_schema() for tool in self._tools.values()}
         for mcp_tool in MCPRegistry.get_instance().list_tools():
-            adapter = MCPToolAdapter(mcp_tool)
-            schemas.append(adapter.to_schema())
-        return schemas
+            if mcp_tool.name not in schemas:
+                adapter = MCPToolAdapter(mcp_tool)
+                schemas[mcp_tool.name] = adapter.to_schema()
+        return list(schemas.values())
 
     def names(self) -> list[str]:
         """Return the sorted names of all registered tools."""
         mcp_names = [t.name for t in MCPRegistry.get_instance().list_tools()]
-        return sorted(list(self._tools.keys()) + mcp_names)
+        return sorted(list(set(self._tools.keys()) | set(mcp_names)))
 
     def __len__(self) -> int:
-        return len(self._tools) + len(MCPRegistry.get_instance().list_tools())
+        mcp_names = [t.name for t in MCPRegistry.get_instance().list_tools()]
+        return len(set(self._tools.keys()) | set(mcp_names))
