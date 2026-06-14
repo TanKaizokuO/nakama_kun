@@ -62,6 +62,14 @@ def wakeup_command() -> None:
     """
     config = get_default_config()
 
+    # Preload RAG models on application startup
+    try:
+        from nakama_kun.rag.model_manager import preload_rag_models
+        preload_rag_models()
+    except Exception as e:
+        from loguru import logger
+        logger.error(f"Failed to preload RAG models: {e}")
+
     try:
         # 1. Banner
         display_banner(

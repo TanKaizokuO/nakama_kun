@@ -79,6 +79,13 @@ class WebServiceContext:
     def __init__(self, workspace_root: str | None = None) -> None:
         self.workspace_root = workspace_root or os.getcwd()
         
+        # Preload RAG models on web application startup
+        try:
+            from nakama_kun.rag.model_manager import preload_rag_models
+            preload_rag_models()
+        except Exception as e:
+            logger.error(f"Failed to preload RAG models: {e}")
+        
         # 1. AI Stack
         self.settings = AISettings()
         self.provider = OpenRouterProvider(self.settings)

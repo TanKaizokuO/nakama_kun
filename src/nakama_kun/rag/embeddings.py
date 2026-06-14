@@ -30,11 +30,10 @@ class LocalEmbeddingProvider(EmbeddingProvider):
 
         # Attempt to load Chroma's default embedding function
         try:
-            from chromadb.utils.embedding_functions import ONNXMiniLM_L6_V2
-            # Use ONNX miniLM if possible
-            self._chroma_ef = ONNXMiniLM_L6_V2()
-            # Test it with a dummy string to see if it downloads and runs successfully
-            _ = self._chroma_ef(["test"])
+            from nakama_kun.rag.model_manager import load_onnx_model
+            self._chroma_ef = load_onnx_model()
+            if self._chroma_ef is None:
+                self._use_fallback = True
         except Exception:
             # Fall back to deterministic hashing vectorizer (useful for offline/hermetic testing)
             self._use_fallback = True
@@ -139,12 +138,9 @@ class BGEM3EmbeddingProvider(EmbeddingProvider):
         self._use_fallback = use_fallback
 
         if not self._use_fallback:
-            try:
-                from sentence_transformers import SentenceTransformer
-                self._model = SentenceTransformer("BAAI/bge-m3")
-            except Exception:
-                from loguru import logger
-                logger.warning("sentence-transformers not installed or BGE-M3 model failed to load locally. Falling back to deterministic hashing vectorizer (dimension 1024).")
+            from nakama_kun.rag.model_manager import load_bgem3_model
+            self._model = load_bgem3_model()
+            if self._model is None:
                 self._use_fallback = True
 
     def _hash_embed(self, text: str) -> list[float]:

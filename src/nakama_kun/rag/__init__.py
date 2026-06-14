@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 
 from nakama_kun.config.rag import RAGSettings
 from nakama_kun.rag.embeddings import (
@@ -13,36 +14,64 @@ from nakama_kun.rag.indexer import Indexer
 from nakama_kun.rag.retriever import Retriever
 from nakama_kun.rag.vector_store import ChromaVectorStore, DocumentChunk, VectorStore
 
+_embedding_provider_cache: EmbeddingProvider | None = None
+_embedding_provider_lock = threading.Lock()
+
+_vector_store_cache: dict[str, VectorStore] = {}
+_vector_store_lock = threading.Lock()
+
+_retriever_cache: dict[str, Retriever] = {}
+_retriever_lock = threading.Lock()
+
+
+def reset_rag_caches() -> None:
+    """Reset cached provider, vector store, and retriever instances (mostly for testing)."""
+    global _embedding_provider_cache, _vector_store_cache, _retriever_cache
+    with _embedding_provider_lock:
+        _embedding_provider_cache = None
+    with _vector_store_lock:
+        _vector_store_cache.clear()
+    with _retriever_lock:
+        _retriever_cache.clear()
+
 
 def get_embedding_provider(settings: RAGSettings) -> EmbeddingProvider:
     """Instantiate the configured embedding provider, mapping settings to providers."""
-    provider_type = settings.rag_embedding_provider.lower()
-    if provider_type in ("openai", "openrouter"):
-        api_key = settings.rag_embedding_api_key
-        # Fall back to general OpenRouter config if RAG credentials are blank
-        if not api_key:
-            from nakama_kun.ai.config import AISettings
-            ai_settings = AISettings()
-            if ai_settings.openrouter_api_key:
-                api_key = ai_settings.openrouter_api_key.get_secret_value()
+    global _embedding_provider_cache
+    if _embedding_provider_cache is not None:
+        return _embedding_provider_cache
 
-        base_url = settings.rag_embedding_base_url
-        if not base_url and provider_type == "openrouter":
-            from nakama_kun.ai.config import AISettings
-            ai_settings = AISettings()
-            base_url = ai_settings.openrouter_base_url
+    with _embedding_provider_lock:
+        if _embedding_provider_cache is None:
+            provider_type = settings.rag_embedding_provider.lower()
+            if provider_type in ("openai", "openrouter"):
+                api_key = settings.rag_embedding_api_key
+                # Fall back to general OpenRouter config if RAG credentials are blank
+                if not api_key:
+                    from nakama_kun.ai.config import AISettings
+                    ai_settings = AISettings()
+                    if ai_settings.openrouter_api_key:
+                        api_key = ai_settings.openrouter_api_key.get_secret_value()
 
-        if not api_key:
-            from loguru import logger
-            logger.warning("RAG embedding API key not found. Falling back to local BGEM3 embedding provider.")
-            return BGEM3EmbeddingProvider()
+                base_url = settings.rag_embedding_base_url
+                if not base_url and provider_type == "openrouter":
+                    from nakama_kun.ai.config import AISettings
+                    ai_settings = AISettings()
+                    base_url = ai_settings.openrouter_base_url
 
-        return OpenAIEmbeddingProvider(
-            api_key=api_key,
-            base_url=base_url,
-            model=settings.rag_embedding_model,
-        )
-    return BGEM3EmbeddingProvider()
+                if not api_key:
+                    from loguru import logger
+                    logger.warning("RAG embedding API key not found. Falling back to local BGEM3 embedding provider.")
+                    _embedding_provider_cache = BGEM3EmbeddingProvider()
+                else:
+                    _embedding_provider_cache = OpenAIEmbeddingProvider(
+                        api_key=api_key,
+                        base_url=base_url,
+                        model=settings.rag_embedding_model,
+                    )
+            else:
+                _embedding_provider_cache = BGEM3EmbeddingProvider()
+        return _embedding_provider_cache
 
 
 def get_vector_store(workspace_root: str | None = None) -> VectorStore | None:
@@ -56,11 +85,18 @@ def get_vector_store(workspace_root: str | None = None) -> VectorStore | None:
     if not os.path.isabs(db_path):
         db_path = os.path.join(root, db_path)
 
-    provider = get_embedding_provider(settings)
-    return ChromaVectorStore(
-        db_path=db_path,
-        embedding_provider=provider,
-    )
+    global _vector_store_cache
+    if root in _vector_store_cache:
+        return _vector_store_cache[root]
+
+    with _vector_store_lock:
+        if root not in _vector_store_cache:
+            provider = get_embedding_provider(settings)
+            _vector_store_cache[root] = ChromaVectorStore(
+                db_path=db_path,
+                embedding_provider=provider,
+            )
+        return _vector_store_cache[root]
 
 
 def get_indexer(workspace_root: str | None = None) -> Indexer | None:
@@ -97,11 +133,17 @@ def get_retriever(workspace_root: str | None = None) -> Retriever | None:
     if not os.path.exists(db_path):
         return None
 
-    store = get_vector_store(root)
-    if store is None:
-        return None
+    global _retriever_cache
+    if root in _retriever_cache:
+        return _retriever_cache[root]
 
-    return Retriever(vector_store=store)
+    with _retriever_lock:
+        if root not in _retriever_cache:
+            store = get_vector_store(root)
+            if store is None:
+                return None
+            _retriever_cache[root] = Retriever(vector_store=store)
+        return _retriever_cache[root]
 
 
 __all__ = [
@@ -118,4 +160,5 @@ __all__ = [
     "get_vector_store",
     "get_indexer",
     "get_retriever",
+    "reset_rag_caches",
 ]

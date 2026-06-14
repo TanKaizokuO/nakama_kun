@@ -41,11 +41,9 @@ class BGEReranker:
         self._use_fallback = use_fallback
 
         if not self._use_fallback:
-            try:
-                from sentence_transformers import CrossEncoder
-                self._model = CrossEncoder("BAAI/bge-reranker-base")
-            except Exception:
-                logger.warning("sentence-transformers not installed or BGE-Reranker failed to load. Falling back to deterministic lexical reranking.")
+            from nakama_kun.rag.model_manager import load_reranker_model
+            self._model = load_reranker_model()
+            if self._model is None:
                 self._use_fallback = True
 
     def rerank(self, query: str, chunks: list[DocumentChunk]) -> list[tuple[DocumentChunk, float]]:
