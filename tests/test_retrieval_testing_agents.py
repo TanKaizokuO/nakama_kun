@@ -237,6 +237,7 @@ async def test_retrieval_testing_workflow_integration(mock_chat_service: MagicMo
         AIResponse(content=plan_text, finish_reason="stop", model="mock-model"),      # Planner
         AIResponse(content=retrieval_text, finish_reason="stop", model="mock-model"), # Retriever
         AIResponse(content=test_text, finish_reason="stop", model="mock-model"),      # TestAgent report
+        AIResponse(content='{"warnings": [], "vulnerabilities": [], "blocked_actions": [], "remediation_suggestions": []}', finish_reason="stop", model="mock-model"),  # SecurityAgent report
         AIResponse(content=reviewer_text, finish_reason="stop", model="mock-model"),  # Reviewer
         AIResponse(content="Final synthesis response", finish_reason="stop", model="mock-model"), # FinalResponse
     ]
@@ -290,6 +291,8 @@ async def test_retrieval_testing_workflow_integration(mock_chat_service: MagicMo
             "agent_metrics": {},
             "retrieval_package": None,
             "test_report": None,
+            "security_report": None,
+            "agent_messages": [],
         }
 
         res = await graph.ainvoke(initial_state)
