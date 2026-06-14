@@ -342,3 +342,54 @@ async def test_duplicate_prevention_metrics(temp_workspace: Path) -> None:
     assert manager.registration_attempts == 2
     assert manager.skipped_duplicates == 1
     assert manager.successful_registrations == 1
+
+
+@pytest.mark.anyio
+async def test_startup_summary(temp_workspace: Path) -> None:
+    """Verify that get_startup_summary() formats correctly and diagnostics returns expected values."""
+    mcp_config = temp_workspace / "mcp_config.json"
+    mcp_config.write_text(
+        json.dumps({
+            "mcpServers": {
+                "summary-server": {
+                    "command": "node",
+                    "args": ["index.js"]
+                }
+            }
+        }),
+        encoding="utf-8"
+    )
+
+    manager = MCPManager(workspace_root=str(temp_workspace))
+
+    mock_initialize_result = MagicMock()
+    mock_initialize_result.capabilities = MagicMock()
+    mock_initialize_result.capabilities.model_dump.return_value = {}
+
+    mock_client = MagicMock(spec=MCPClient)
+    mock_client.name = "summary-server"
+    mock_client.connect = AsyncMock()
+    mock_client.disconnect = AsyncMock()
+    mock_client.session = MagicMock()
+    mock_client.session.initialize_result = mock_initialize_result
+
+    tool1 = Tool(name="tool_one", description="Tool 1", inputSchema={})
+    mock_client.list_tools = AsyncMock(return_value=[tool1])
+
+    with patch("nakama_kun.mcp.manager.MCPClient", return_value=mock_client):
+        await manager.connect_all()
+
+    summary = manager.get_startup_summary()
+    assert "## MCP Startup Summary" in summary
+    assert "Servers Connected: 1" in summary
+    assert "Tools Registered: 1" in summary
+    assert "Conflicts Renamed: 0" in summary
+    assert "Duplicate Registrations Prevented: 0" in summary
+
+    diag = manager.diagnostics()
+    assert diag["servers_connected"] == 1
+    assert diag["tools_registered"] == 1
+    assert diag["conflicts_renamed"] == 0
+    assert diag["duplicate_registrations_prevented"] == 0
+    assert diag["registration_attempts"] == 1
+    assert diag["successful_registrations"] == 1

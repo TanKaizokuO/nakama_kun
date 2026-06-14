@@ -80,6 +80,9 @@ class MCPManager:
                     del self.clients[name]
                 continue
 
+        summary = self.get_startup_summary()
+        logger.info("\n" + summary)
+
     async def discover_server_tools(self, name: str) -> None:
         """Discover and register tools for a specific connected server if not already loaded."""
         if name in self._tools_loaded:
@@ -242,3 +245,26 @@ class MCPManager:
             except Exception as e:
                 logger.warning(f"Health check failed for server '{name}': {e}")
                 server.status = MCPServerStatus.ERROR
+
+    def get_startup_summary(self) -> str:
+        """Create and return a formatted markdown MCP startup summary."""
+        connected_count = len([s for s in self.registry.list_servers() if s.status == MCPServerStatus.CONNECTED])
+        tools_registered = len(self.registry.list_tools())
+        return (
+            "## MCP Startup Summary\n\n"
+            f"Servers Connected: {connected_count}\n"
+            f"Tools Registered: {tools_registered}\n"
+            f"Conflicts Renamed: {self.conflicts_renamed}\n"
+            f"Duplicate Registrations Prevented: {self.skipped_duplicates}"
+        )
+
+    def diagnostics(self) -> dict[str, Any]:
+        """Expose operational diagnostics and metrics."""
+        return {
+            "servers_connected": len([s for s in self.registry.list_servers() if s.status == MCPServerStatus.CONNECTED]),
+            "tools_registered": len(self.registry.list_tools()),
+            "conflicts_renamed": self.conflicts_renamed,
+            "duplicate_registrations_prevented": self.skipped_duplicates,
+            "registration_attempts": self.registration_attempts,
+            "successful_registrations": self.successful_registrations,
+        }
