@@ -167,3 +167,55 @@ class AgentMessage(BaseModel):
     timestamp: float = Field(default_factory=time.time, description="Unix timestamp of when the message was sent.")
 
 
+class TaskDelegation(BaseModel):
+    """A task delegation assigned by the Supervisor Agent."""
+
+    task: str = Field(description="Detailed description of the task to be performed.")
+    assigned_agent: str = Field(description="The name or role of the agent assigned to this task.")
+    priority: int = Field(default=1, description="Priority level of the task.")
+    dependencies: list[str] = Field(default_factory=list, description="List of task descriptions or agent roles this task depends on.")
+    status: str = Field(default="pending", description="Current status of the delegation: pending, running, completed, failed.")
+
+
+class SupervisorDecision(BaseModel):
+    """Structured decision returned by the Supervisor Agent."""
+
+    rationale: str = Field(description="Detailed explanation/reasoning of the supervisor's choices.")
+    next_agents: list[str] = Field(description="List of agent roles/names to execute next (multiple values mean parallel execution).")
+    delegations: list[TaskDelegation] = Field(default_factory=list, description="The list of task delegations managed by the supervisor.")
+    status: str = Field(description="The overall task status: planning, executing, reviewing, done, failed.")
+
+
+def parse_supervisor_decision(text: str) -> SupervisorDecision | None:
+    """Parse a structured SupervisorDecision model from JSON text or code blocks."""
+    import json
+    import re
+    text_stripped = text.strip()
+    try:
+        data = json.loads(text_stripped)
+        return SupervisorDecision.model_validate(data)
+    except Exception:
+        pass
+
+    # Try matching json block ```json ... ```
+    match = re.search(r"```json\s*(.*?)\s*```", text_stripped, re.DOTALL | re.IGNORECASE)
+    if match:
+        try:
+            data = json.loads(match.group(1).strip())
+            return SupervisorDecision.model_validate(data)
+        except Exception:
+            pass
+
+    # Try matching general block ``` ... ```
+    match = re.search(r"```\s*(.*?)\s*```", text_stripped, re.DOTALL | re.IGNORECASE)
+    if match:
+        try:
+            data = json.loads(match.group(1).strip())
+            return SupervisorDecision.model_validate(data)
+        except Exception:
+            pass
+
+    return None
+
+
+

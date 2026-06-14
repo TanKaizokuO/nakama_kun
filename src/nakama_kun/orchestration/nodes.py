@@ -1815,3 +1815,21 @@ def make_security_agent_node(
 
     return security_agent_node
 
+
+def make_supervisor_agent_node(
+    chat_service: ChatService,
+) -> Callable[[AgentState], Any]:
+    """Factory creating the Supervisor Agent Node.
+
+    Supervisor Agent decomposes tasks, delegates subtasks, and dynamically routes nodes.
+    """
+    async def supervisor_agent_node(state: AgentState) -> dict[str, Any]:
+        logger.info("[LangGraph] Supervisor Agent Node starting...")
+        from nakama_kun.agents.supervisor import SupervisorAgent
+        agent = SupervisorAgent(chat_service=chat_service)
+        res = await agent.run(dict(state))
+        return res
+
+    return supervisor_agent_node
+
+
