@@ -246,8 +246,15 @@ async def test_graph_wiring_and_handoffs(mock_chat_service: MagicMock) -> None:
             "active_agent": "",
             "agent_outputs": {},
             "agent_metrics": {},
+            "delegations": [],
+            "supervisor_telemetry": {
+                "agent_utilization": {},
+                "task_latency": [],
+                "delegation_history": [],
+                "failure_rates": {},
+            },
         }
 
         res = await graph.ainvoke(initial_state)
         assert res["status"] == "done"
-        assert res["active_agent"] == "ReviewerAgent"
+        assert res["active_agent"] == "SupervisorAgent"

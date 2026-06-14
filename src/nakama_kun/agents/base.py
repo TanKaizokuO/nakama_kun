@@ -72,6 +72,8 @@ class BaseAgent(ABC):
         # 1. Execute agent logic based on role
         if self.role == "planner":
             updates = await self.plan(state)
+        elif self.role == "supervisor":
+            updates = await self.plan(state)
         elif self.role == "retriever":
             updates = await self.execute(state)
         elif self.role == "coder":
@@ -92,6 +94,10 @@ class BaseAgent(ABC):
         outputs = dict(state.get("agent_outputs") or {})
         if self.role == "planner":
             outputs[self.name] = updates.get("plan")
+        elif self.role == "supervisor":
+            outputs[self.name] = {
+                "delegations": updates.get("delegations"),
+            }
         elif self.role == "retriever":
             outputs[self.name] = updates.get("retrieval_package")
         elif self.role == "coder":
@@ -131,6 +137,11 @@ class BaseAgent(ABC):
                     if isinstance(handoff, dict) and "goal_summary" in handoff:
                         plans.append(handoff)
             self._memory["successful_plans"] = plans
+        elif self.role == "supervisor":
+            self._memory["delegation_history"] = [
+                h for h in history
+                if h.get("agent") in ("SupervisorAgent", self.name)
+            ]
         elif self.role == "retriever":
             self._memory["retrieval_history"] = [
                 h for h in history

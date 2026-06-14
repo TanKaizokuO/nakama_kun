@@ -115,6 +115,10 @@ class AgentState(TypedDict):
     security_report: SecurityReport | None
     agent_messages: Annotated[list[AgentMessage], operator.add]
 
+    # Phase 4 Multi-Agent Architecture extensions
+    delegations: Annotated[list[dict[str, Any]], merge_lists]
+    supervisor_telemetry: dict[str, Any]
+
 
 
 class RetryMemory(TypedDict):

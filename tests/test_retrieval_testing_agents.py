@@ -249,8 +249,56 @@ async def test_retrieval_testing_workflow_integration(mock_chat_service: MagicMo
     ]
 
     # Patch verifier & RAG calls so we don't hit real workspace filesystem
+    async def mock_supervisor_run(state: dict[str, Any]) -> dict[str, Any]:
+        active = state.get("active_agent", "")
+        if not active:
+            next_agents = ["PlannerAgent"]
+            status = "executing"
+        elif active == "PlannerAgent":
+            next_agents = ["RetrieverAgent"]
+            status = "executing"
+        elif active == "RetrieverAgent":
+            next_agents = ["CoderAgent"]
+            status = "executing"
+        elif active == "CoderAgent":
+            next_agents = ["TestAgent"]
+            status = "executing"
+        elif active == "TestAgent":
+            next_agents = ["SecurityAgent"]
+            status = "executing"
+        elif active == "SecurityAgent":
+            next_agents = ["VerifierAgent"]
+            status = "executing"
+        elif active == "VerifierAgent":
+            next_agents = ["ReviewerAgent"]
+            status = "executing"
+        elif active == "ReviewerAgent":
+            next_agents = ["final_response"]
+            status = "done"
+        else:
+            next_agents = ["final_response"]
+            status = "done"
+
+        thought = f"Scheduled: {next_agents}."
+        history_entry = {
+            "agent": "SupervisorAgent",
+            "thought": thought,
+            "handoff": {
+                "next_agents": next_agents,
+                "status": status,
+                "rationale": "Mock sequential routing",
+            }
+        }
+        return {
+            "status": status,
+            "agent_history": [history_entry],
+            "reviewer_route": None,
+            "active_agent": "SupervisorAgent",
+        }
+
     with patch("nakama_kun.agents.verifier.VerificationLayer.run") as mock_ver_run, \
-         patch("nakama_kun.agents.retriever.get_retriever") as mock_get_ret:
+         patch("nakama_kun.agents.retriever.get_retriever") as mock_get_ret, \
+         patch("nakama_kun.agents.supervisor.SupervisorAgent.run", side_effect=mock_supervisor_run):
 
         mock_report = MagicMock()
         mock_report.files_created = []
@@ -293,11 +341,18 @@ async def test_retrieval_testing_workflow_integration(mock_chat_service: MagicMo
             "test_report": None,
             "security_report": None,
             "agent_messages": [],
+            "delegations": [],
+            "supervisor_telemetry": {
+                "agent_utilization": {},
+                "task_latency": [],
+                "delegation_history": [],
+                "failure_rates": {},
+            },
         }
 
         res = await graph.ainvoke(initial_state)
         assert res["status"] == "done"
-        assert res["active_agent"] == "ReviewerAgent"
+        assert res["active_agent"] == "SupervisorAgent"
         assert res["final_response"] == "Final synthesis response"
         assert "RetrieverAgent" in res["agent_outputs"]
         assert "TestAgent" in res["agent_outputs"]

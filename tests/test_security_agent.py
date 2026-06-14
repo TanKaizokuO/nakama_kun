@@ -230,6 +230,13 @@ async def test_security_workflow_integration() -> None:
         "test_report": None,
         "security_report": None,
         "agent_messages": [],
+        "delegations": [],
+        "supervisor_telemetry": {
+            "agent_utilization": {},
+            "task_latency": [],
+            "delegation_history": [],
+            "failure_rates": {},
+        },
     }
 
     res = await graph.ainvoke(initial_state)
