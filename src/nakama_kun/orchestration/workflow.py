@@ -16,9 +16,62 @@ from nakama_kun.orchestration.nodes import (
     make_retriever_agent_node,
     make_test_agent_node,
     make_security_agent_node,
+    make_supervisor_agent_node,
 )
 from nakama_kun.orchestration.state import AgentState
 from nakama_kun.tools import ToolRegistry, ToolRouter
+
+
+def route_from_supervisor(state: AgentState) -> str | list[str]:
+    """Determine the next node(s) to execute based on Supervisor decisions."""
+    status = state.get("status", "planning")
+    if status == "done":
+        logger.info("[LangGraph] Supervisor marked task as done. Routing to final response.")
+        return "final_response"
+    elif status == "failed":
+        logger.warning("[LangGraph] Supervisor marked task as failed. Routing to final response.")
+        return "final_response"
+
+    # Get the latest supervisor scheduling decisions
+    history = state.get("agent_history") or []
+    next_agents = []
+    for h in reversed(history):
+        if h.get("agent") == "SupervisorAgent":
+            handoff = h.get("handoff") or {}
+            next_agents = handoff.get("next_agents") or []
+            break
+
+    if not next_agents:
+        logger.warning("[LangGraph] No next agents scheduled by Supervisor. Routing to final response.")
+        return "final_response"
+
+    mapping = {
+        "PlannerAgent": "planner_agent_node",
+        "RetrieverAgent": "retriever_agent_node",
+        "CoderAgent": "coder_agent_node",
+        "TestAgent": "test_agent_node",
+        "SecurityAgent": "security_agent_node",
+        "VerifierAgent": "verifier_agent_node",
+        "ReviewerAgent": "reviewer_agent_node",
+        "final_response": "final_response",
+    }
+
+    routed_nodes = []
+    for na in next_agents:
+        node = mapping.get(na)
+        if node:
+            routed_nodes.append(node)
+
+    if not routed_nodes:
+        logger.warning(f"[LangGraph] Scheduled agents {next_agents} could not be mapped. Routing to final response.")
+        return "final_response"
+
+    if len(routed_nodes) == 1:
+        logger.info(f"[LangGraph] Supervisor routing to single node: {routed_nodes[0]}")
+        return routed_nodes[0]
+
+    logger.info(f"[LangGraph] Supervisor routing to parallel nodes: {routed_nodes}")
+    return routed_nodes
 
 
 def route_after_review(state: AgentState) -> str:
@@ -105,6 +158,7 @@ def build_agent_graph(
     security_agent_node: Any = make_security_agent_node(chat_service)
     verifier_agent_node: Any = make_verifier_agent_node(workspace_root, chat_service)
     reviewer_agent_node: Any = make_reviewer_agent_node(chat_service, workspace_root)
+    supervisor_agent_node: Any = make_supervisor_agent_node(chat_service)
     final_response_node: Any = make_final_response_node(chat_service)
 
     # 2. Add nodes to graph
@@ -115,37 +169,36 @@ def build_agent_graph(
     workflow.add_node("security_agent_node", security_agent_node)
     workflow.add_node("verifier_agent_node", verifier_agent_node)
     workflow.add_node("reviewer_agent_node", reviewer_agent_node)
+    workflow.add_node("supervisor_agent_node", supervisor_agent_node)
     workflow.add_node("final_response", final_response_node)
 
     # 3. Define transitions / edges
-    workflow.add_edge(START, "planner_agent_node")
-    workflow.add_edge("planner_agent_node", "retriever_agent_node")
-    workflow.add_edge("retriever_agent_node", "coder_agent_node")
+    workflow.add_edge(START, "supervisor_agent_node")
     
-    # Conditional routing after Coder Agent
+    # Conditional edge from Supervisor
     workflow.add_conditional_edges(
-        "coder_agent_node",
-        route_after_coder,
-        {
-            "test_agent_node": "test_agent_node",
-            "final_response": "final_response",
-        },
-    )
-    
-    workflow.add_edge("test_agent_node", "security_agent_node")
-    workflow.add_edge("security_agent_node", "verifier_agent_node")
-    workflow.add_edge("verifier_agent_node", "reviewer_agent_node")
-
-    # Conditional routing after QA Review
-    workflow.add_conditional_edges(
-        "reviewer_agent_node",
-        route_after_review,
+        "supervisor_agent_node",
+        route_from_supervisor,
         {
             "planner_agent_node": "planner_agent_node",
+            "retriever_agent_node": "retriever_agent_node",
             "coder_agent_node": "coder_agent_node",
+            "test_agent_node": "test_agent_node",
+            "security_agent_node": "security_agent_node",
+            "verifier_agent_node": "verifier_agent_node",
+            "reviewer_agent_node": "reviewer_agent_node",
             "final_response": "final_response",
-        },
+        }
     )
+
+    # Spoke nodes return to Supervisor
+    workflow.add_edge("planner_agent_node", "supervisor_agent_node")
+    workflow.add_edge("retriever_agent_node", "supervisor_agent_node")
+    workflow.add_edge("coder_agent_node", "supervisor_agent_node")
+    workflow.add_edge("test_agent_node", "supervisor_agent_node")
+    workflow.add_edge("security_agent_node", "supervisor_agent_node")
+    workflow.add_edge("verifier_agent_node", "supervisor_agent_node")
+    workflow.add_edge("reviewer_agent_node", "supervisor_agent_node")
 
     workflow.add_edge("final_response", END)
 
