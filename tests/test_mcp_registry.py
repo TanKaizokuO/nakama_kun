@@ -463,3 +463,165 @@ async def test_repeated_connect_all_is_safe(temp_workspace: Path) -> None:
     # Verify that the wrapper instances inside the MCP server tools list did not change (no new wrappers created)
     current_mcp_tools = list(manager.registry.list_tools())
     assert current_mcp_tools[0] is initial_mcp_tools[0]
+
+
+@pytest.mark.anyio
+async def test_final_registry_validation(temp_workspace: Path) -> None:
+    """Validate the final production tool inventory:
+    - Every tool appears exactly once.
+    - Repeated discovery remains safe.
+    - Repeated connect_all remains safe.
+    - Health checks never mutate state.
+    """
+    from nakama_kun.tools.interfaces import BaseTool
+
+    mcp_config = temp_workspace / "mcp_config.json"
+    mcp_config.write_text(
+        json.dumps({
+            "mcpServers": {
+                "filesystem": {"command": "node", "args": []},
+                "github": {"command": "node", "args": []},
+                "postgres": {"command": "node", "args": []},
+                "browser": {"command": "node", "args": []},
+            }
+        }),
+        encoding="utf-8"
+    )
+
+    manager = MCPManager(workspace_root=str(temp_workspace))
+    tool_registry = ToolRegistry()
+
+    # Register native tools
+    class DummyTool(BaseTool):
+        def __init__(self, name: str):
+            self._name = name
+        @property
+        def name(self) -> str:
+            return self._name
+        @property
+        def description(self) -> str:
+            return "Native"
+        @property
+        def parameters(self) -> dict:
+            return {}
+        async def execute(self, **kwargs):
+            return None
+
+    native_names = [
+        "read_file",
+        "write_file",
+        "search_files",
+        "list_files",
+        "run_command",
+        "search_vector_store",
+    ]
+    for n in native_names:
+        tool_registry.register(DummyTool(n))
+
+    # Mock clients
+    mock_initialize_result = MagicMock()
+    mock_initialize_result.capabilities = MagicMock()
+    mock_initialize_result.capabilities.model_dump.return_value = {}
+
+    clients = {}
+    server_tools = {
+        "filesystem": [
+            Tool(name="read_file", description="Read", inputSchema={}),
+            Tool(name="write_file", description="Write", inputSchema={}),
+            Tool(name="search_files", description="Search", inputSchema={}),
+        ],
+        "github": [
+            Tool(name="github_create_issue", description="Create Issue", inputSchema={}),
+            Tool(name="github_get_issue", description="Get Issue", inputSchema={}),
+            Tool(name="github_list_prs", description="List PRs", inputSchema={}),
+            Tool(name="github_search_repo", description="Search Repo", inputSchema={}),
+        ],
+        "postgres": [
+            Tool(name="postgres_query", description="Query", inputSchema={}),
+            Tool(name="postgres_list_tables", description="List Tables", inputSchema={}),
+            Tool(name="postgres_describe_table", description="Describe Table", inputSchema={}),
+        ],
+        "browser": [
+            Tool(name="browser_open", description="Open", inputSchema={}),
+            Tool(name="browser_search", description="Search", inputSchema={}),
+            Tool(name="browser_extract_content", description="Extract Content", inputSchema={}),
+        ]
+    }
+
+    for server_name, tools in server_tools.items():
+        client = MagicMock(spec=MCPClient)
+        client.name = server_name
+        client.connect = AsyncMock()
+        client.disconnect = AsyncMock()
+        client.session = MagicMock()
+        client.session.initialize_result = mock_initialize_result
+        client.list_tools = AsyncMock(return_value=tools)
+        clients[server_name] = client
+
+    def get_mock_client(name, *args, **kwargs):
+        return clients[name]
+
+    with patch("nakama_kun.mcp.manager.MCPClient", side_effect=get_mock_client):
+        await manager.connect_all()
+
+    # Register in ToolRegistry
+    mcp_tools = await manager.get_tools()
+    for t in mcp_tools:
+        tool_registry.register(t)
+
+    # 1. Verify every tool appears exactly once
+    expected_tools = [
+        "read_file",
+        "write_file",
+        "search_files",
+        "list_files",
+        "run_command",
+        "search_vector_store",
+        "mcp_filesystem_read_file",
+        "mcp_filesystem_write_file",
+        "mcp_filesystem_search_files",
+        "github_create_issue",
+        "github_get_issue",
+        "github_list_prs",
+        "github_search_repo",
+        "postgres_query",
+        "postgres_list_tables",
+        "postgres_describe_table",
+        "browser_open",
+        "browser_search",
+        "browser_extract_content",
+    ]
+
+    all_names = tool_registry.names()
+    for name in expected_tools:
+        assert name in all_names
+        assert all_names.count(name) == 1
+
+    assert len(tool_registry) == len(expected_tools)
+
+    # 2. Verify repeated connect_all remains safe
+    with patch("nakama_kun.mcp.manager.MCPClient", side_effect=get_mock_client):
+        await manager.connect_all()
+
+    mcp_tools_repeated = await manager.get_tools()
+    for t in mcp_tools_repeated:
+        tool_registry.register(t)
+
+    all_names_repeated = tool_registry.names()
+    for name in expected_tools:
+        assert all_names_repeated.count(name) == 1
+    assert len(tool_registry) == len(expected_tools)
+
+    # 3. Verify health checks never mutate state
+    # We change the mocked tools list on browser client to return something else
+    clients["browser"].list_tools = AsyncMock(return_value=[
+        Tool(name="mutated_tool", description="Mutated", inputSchema={})
+    ])
+
+    await manager.health_check()
+
+    # Registry state should NOT have mutated_tool or be changed
+    mcp_tools_after_hc = await manager.get_tools()
+    names_after_hc = {t.name for t in mcp_tools_after_hc}
+    assert "mutated_tool" not in names_after_hc
+    assert "browser_open" in names_after_hc
