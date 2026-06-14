@@ -43,6 +43,11 @@ class ToolRegistry:
         before = len(self)
         if tool_name not in self._tools:
             self._tools[tool_name] = tool
+        else:
+            logger.info(
+                "Duplicate prevention: tool '{}' already registered in ToolRegistry, skipping.",
+                tool_name,
+            )
         after = len(self)
 
         logger.debug(

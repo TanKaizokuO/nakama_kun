@@ -393,3 +393,73 @@ async def test_startup_summary(temp_workspace: Path) -> None:
     assert diag["duplicate_registrations_prevented"] == 0
     assert diag["registration_attempts"] == 1
     assert diag["successful_registrations"] == 1
+
+
+@pytest.mark.anyio
+async def test_repeated_connect_all_is_safe(temp_workspace: Path) -> None:
+    """Verify that calling connect_all repeatedly preserves registry size, tool count, and does not create duplicate wrappers."""
+    mcp_config = temp_workspace / "mcp_config.json"
+    mcp_config.write_text(
+        json.dumps({
+            "mcpServers": {
+                "safe-server": {
+                    "command": "node",
+                    "args": ["index.js"]
+                }
+            }
+        }),
+        encoding="utf-8"
+    )
+
+    manager = MCPManager(workspace_root=str(temp_workspace))
+    tool_registry = ToolRegistry()
+
+    mock_initialize_result = MagicMock()
+    mock_initialize_result.capabilities = MagicMock()
+    mock_initialize_result.capabilities.model_dump.return_value = {}
+
+    mock_client = MagicMock(spec=MCPClient)
+    mock_client.name = "safe-server"
+    mock_client.connect = AsyncMock()
+    mock_client.disconnect = AsyncMock()
+    mock_client.session = MagicMock()
+    mock_client.session.initialize_result = mock_initialize_result
+
+    tool1 = Tool(name="tool_one", description="Tool 1", inputSchema={})
+    mock_client.list_tools = AsyncMock(return_value=[tool1])
+
+    # 1. First connect
+    with patch("nakama_kun.mcp.manager.MCPClient", return_value=mock_client):
+        await manager.connect_all()
+
+    mcp_tools_1 = await manager.get_tools()
+    for t in mcp_tools_1:
+        tool_registry.register(t)
+
+    initial_mcp_tools = list(manager.registry.list_tools())
+    assert len(initial_mcp_tools) == 1
+    assert len(tool_registry) == 1
+
+    # 2. Second connect
+    with patch("nakama_kun.mcp.manager.MCPClient", return_value=mock_client):
+        await manager.connect_all()
+
+    mcp_tools_2 = await manager.get_tools()
+    for t in mcp_tools_2:
+        tool_registry.register(t)
+
+    # 3. Third connect
+    with patch("nakama_kun.mcp.manager.MCPClient", return_value=mock_client):
+        await manager.connect_all()
+
+    mcp_tools_3 = await manager.get_tools()
+    for t in mcp_tools_3:
+        tool_registry.register(t)
+
+    # Registry size and tool counts must remain unchanged
+    assert len(manager.registry.list_tools()) == 1
+    assert len(tool_registry) == 1
+
+    # Verify that the wrapper instances inside the MCP server tools list did not change (no new wrappers created)
+    current_mcp_tools = list(manager.registry.list_tools())
+    assert current_mcp_tools[0] is initial_mcp_tools[0]

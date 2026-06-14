@@ -43,12 +43,20 @@ class MCPManager:
 
         for name, cfg in configs.items():
             if name in self._tools_loaded:
+                logger.info("Duplicate prevention: server '{}' tools already loaded, skipping connection and discovery.", name)
                 server = self.registry.get_server(name)
                 if server:
                     num_tools = len(server.tools)
                     self.registration_attempts += num_tools
                     self.skipped_duplicates += num_tools
                 continue
+
+            existing_server = self.registry.get_server(name)
+            if existing_server is not None:
+                logger.info("Reconnecting to MCP server '{}'...", name)
+            else:
+                logger.info("Discovered and connecting to MCP server '{}'...", name)
+
             # 1. Register server in STARTING state
             server = MCPServer(
                 name=name,
@@ -80,12 +88,18 @@ class MCPManager:
                     del self.clients[name]
                 continue
 
+        # Registry totals
+        connected_servers = len([s for s in self.registry.list_servers() if s.status == MCPServerStatus.CONNECTED])
+        registered_tools = len(self.registry.list_tools())
+        logger.info("Registry totals: {} connected servers, {} registered tools.", connected_servers, registered_tools)
+
         summary = self.get_startup_summary()
         logger.info("\n" + summary)
 
     async def discover_server_tools(self, name: str) -> None:
         """Discover and register tools for a specific connected server if not already loaded."""
         if name in self._tools_loaded:
+            logger.info("Duplicate prevention: server '{}' tools already loaded, skipping discovery.", name)
             server = self.registry.get_server(name)
             if server:
                 num_tools = len(server.tools)
@@ -171,8 +185,10 @@ class MCPManager:
                 
                 self.registration_attempts += 1
                 if target_name in {mt.name for mt in mcp_tools} or self.registry.find_tool(target_name) is not None:
+                    logger.info("Duplicate prevention: tool '{}' already registered, skipping duplicate.", target_name)
                     self.skipped_duplicates += 1
                 else:
+                    logger.info("Registering tool '{}' from server '{}'", target_name, name)
                     self.successful_registrations += 1
                     mcp_tools.append(mcp_tool)
 
