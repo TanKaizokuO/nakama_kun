@@ -146,3 +146,146 @@ async def test_health_check_does_not_register_tools(temp_workspace: Path) -> Non
     mcp_tools_after_hc = await manager.get_tools()
     assert len(mcp_tools_after_hc) == 1
     assert mcp_tools_after_hc[0].name == "tool_one"
+
+
+@pytest.mark.anyio
+async def test_tool_conflict_namespaced_once(temp_workspace: Path) -> None:
+    """Verify that a tool name conflict between native and MCP tools results in namespaced naming exactly once each."""
+    from nakama_kun.tools.interfaces import BaseTool
+
+    # Write mock configurations
+    mcp_config = temp_workspace / "mcp_config.json"
+    mcp_config.write_text(
+        json.dumps({
+            "mcpServers": {
+                "filesystem": {
+                    "command": "node",
+                    "args": ["index.js"]
+                }
+            }
+        }),
+        encoding="utf-8"
+    )
+
+    manager = MCPManager(workspace_root=str(temp_workspace))
+    tool_registry = ToolRegistry()
+
+    # Register native read_file tool
+    class DummyTool(BaseTool):
+        def __init__(self, name: str):
+            self._name = name
+        @property
+        def name(self) -> str:
+            return self._name
+        @property
+        def description(self) -> str:
+            return "Native tool"
+        @property
+        def parameters(self) -> dict:
+            return {}
+        async def execute(self, **kwargs):
+            return None
+
+    tool_registry.register(DummyTool("read_file"))
+
+    # Mock MCPClient for "filesystem"
+    mock_initialize_result = MagicMock()
+    mock_initialize_result.capabilities = MagicMock()
+    mock_initialize_result.capabilities.model_dump.return_value = {}
+
+    mock_client = MagicMock(spec=MCPClient)
+    mock_client.name = "filesystem"
+    mock_client.connect = AsyncMock()
+    mock_client.disconnect = AsyncMock()
+    mock_client.session = MagicMock()
+    mock_client.session.initialize_result = mock_initialize_result
+
+    # Mock MCP tool read_file
+    mcp_tool_raw = Tool(name="read_file", description="MCP read file", inputSchema={})
+    mock_client.list_tools = AsyncMock(return_value=[mcp_tool_raw])
+
+    with patch("nakama_kun.mcp.manager.MCPClient", return_value=mock_client):
+        await manager.connect_all()
+
+    # Register in ToolRegistry
+    mcp_tools = await manager.get_tools()
+    for t in mcp_tools:
+        tool_registry.register(t)
+
+    # Names should contain "read_file" and "mcp_filesystem_read_file"
+    all_names = tool_registry.names()
+    assert "read_file" in all_names
+    assert "mcp_filesystem_read_file" in all_names
+
+    # Check exactly once occurrence of each name
+    assert all_names.count("read_file") == 1
+    assert all_names.count("mcp_filesystem_read_file") == 1
+
+    # Total length should be 2
+    assert len(tool_registry) == 2
+
+
+@pytest.mark.anyio
+async def test_reconnect_behavior(temp_workspace: Path) -> None:
+    """Verify that connect -> disconnect -> reconnect sequence behaves correctly and doesn't duplicate tools."""
+    mcp_config = temp_workspace / "mcp_config.json"
+    mcp_config.write_text(
+        json.dumps({
+            "mcpServers": {
+                "reconnect-server": {
+                    "command": "node",
+                    "args": ["index.js"]
+                }
+            }
+        }),
+        encoding="utf-8"
+    )
+
+    manager = MCPManager(workspace_root=str(temp_workspace))
+    tool_registry = ToolRegistry()
+
+    # Mock MCPClient
+    mock_initialize_result = MagicMock()
+    mock_initialize_result.capabilities = MagicMock()
+    mock_initialize_result.capabilities.model_dump.return_value = {}
+
+    mock_client = MagicMock(spec=MCPClient)
+    mock_client.name = "reconnect-server"
+    mock_client.connect = AsyncMock()
+    mock_client.disconnect = AsyncMock()
+    mock_client.session = MagicMock()
+    mock_client.session.initialize_result = mock_initialize_result
+
+    # Mock tools
+    tool = Tool(name="reconnect_tool", description="Tool", inputSchema={})
+    mock_client.list_tools = AsyncMock(return_value=[tool])
+
+    # 1. Connect
+    with patch("nakama_kun.mcp.manager.MCPClient", return_value=mock_client):
+        await manager.connect_all()
+
+    mcp_tools = await manager.get_tools()
+    for t in mcp_tools:
+        tool_registry.register(t)
+
+    assert len(tool_registry) == 1
+    assert "reconnect_tool" in tool_registry.names()
+
+    # 2. Disconnect
+    await manager.disconnect_all()
+    # verify tools removed from server tools
+    server = manager.registry.get_server("reconnect-server")
+    assert server is not None
+    assert len(server.tools) == 0
+
+    # 3. Reconnect
+    with patch("nakama_kun.mcp.manager.MCPClient", return_value=mock_client):
+        await manager.connect_all()
+
+    mcp_tools_2 = await manager.get_tools()
+    for t in mcp_tools_2:
+        tool_registry.register(t)
+
+    # Size should still be 1 (no duplicates)
+    assert len(tool_registry) == 1
+    assert tool_registry.names() == ["reconnect_tool"]
