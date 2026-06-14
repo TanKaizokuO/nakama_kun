@@ -89,14 +89,26 @@ class MCPTool(BaseTool):
         return None
 
     async def execute(self, **kwargs: Any) -> ToolResult:
+        import time
+        from nakama_kun.mcp.telemetry import MCPTelemetry
+        start_time = time.time()
+
         # 1. Enforce safety gating for mutating actions
         if is_mutating_tool(self.original_name) or is_mutating_tool(self.name):
             approved = await self._request_approval(kwargs)
             if not approved:
-                return ToolResult(
+                res = ToolResult(
                     success=False,
                     error=f"Execution of mutating external tool '{self.name}' was rejected by the user.",
                 )
+                MCPTelemetry.get_instance().record_call(
+                    server=self.server_name,
+                    tool=self.name,
+                    start_time=start_time,
+                    success=False,
+                    error=res.error
+                )
+                return res
 
         # 2. Call tool via client session
         try:
@@ -105,11 +117,21 @@ class MCPTool(BaseTool):
             is_error = getattr(result, "is_error", getattr(result, "isError", False))
 
             if is_error:
-                return ToolResult(success=False, error=output)
-            return ToolResult(success=True, output=output)
+                res = ToolResult(success=False, error=output)
+            else:
+                res = ToolResult(success=True, output=output)
         except Exception as e:
             logger.error(f"Error during execution of MCP tool '{self.name}': {e}")
-            return ToolResult(success=False, error=str(e))
+            res = ToolResult(success=False, error=str(e))
+
+        MCPTelemetry.get_instance().record_call(
+            server=self.server_name,
+            tool=self.name,
+            start_time=start_time,
+            success=res.success,
+            error=res.error
+        )
+        return res
 
     async def _request_approval(self, arguments: dict[str, Any]) -> bool:
         """Asks for confirmation to run a mutating/modifying external tool."""
