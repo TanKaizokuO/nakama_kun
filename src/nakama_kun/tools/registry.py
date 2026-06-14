@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from loguru import logger
+
 from nakama_kun.mcp.registry import MCPRegistry
 from nakama_kun.tools.adapters import MCPToolAdapter
 from nakama_kun.tools.exceptions import UnknownToolError
@@ -24,7 +26,29 @@ class ToolRegistry:
 
     def register(self, tool: BaseTool) -> None:
         """Add *tool* to the registry.  Silently overwrites any prior entry."""
-        self._tools[tool.name] = tool
+        tool_name = tool.name
+        if hasattr(tool, "server_name"):
+            server_name = tool.server_name
+        elif hasattr(tool, "mcp_tool") and hasattr(tool.mcp_tool, "server_name"):
+            server_name = tool.mcp_tool.server_name
+        else:
+            server_name = "local"
+
+        logger.debug(
+            "Registering tool '{}' from server '{}'",
+            tool_name,
+            server_name,
+        )
+
+        before = len(self)
+        self._tools[tool_name] = tool
+        after = len(self)
+
+        logger.debug(
+            "Registry size before={} after={}",
+            before,
+            after,
+        )
 
     def get(self, name: str) -> BaseTool:
         """Return the tool registered under *name*.

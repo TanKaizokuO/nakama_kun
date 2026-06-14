@@ -87,6 +87,11 @@ class MCPManager:
 
                 # Discover and register tools
                 tools = await client.list_tools()
+                logger.debug(
+                    "Discovered {} tools from '{}'",
+                    len(tools),
+                    name,
+                )
                 mcp_tools = []
                 for t in tools:
                     orig_name = t.name
