@@ -25,6 +25,10 @@ class MCPManager:
         self.clients: dict[str, MCPClient] = {}
         self.registry = MCPRegistry.get_instance()
         self._tools_loaded: set[str] = set()
+        self.registration_attempts = 0
+        self.successful_registrations = 0
+        self.skipped_duplicates = 0
+        self.conflicts_renamed = 0
 
     async def connect_all(self) -> None:
         """Connects to all configured MCP servers asynchronously.
@@ -39,6 +43,11 @@ class MCPManager:
 
         for name, cfg in configs.items():
             if name in self._tools_loaded:
+                server = self.registry.get_server(name)
+                if server:
+                    num_tools = len(server.tools)
+                    self.registration_attempts += num_tools
+                    self.skipped_duplicates += num_tools
                 continue
             # 1. Register server in STARTING state
             server = MCPServer(
@@ -74,6 +83,11 @@ class MCPManager:
     async def discover_server_tools(self, name: str) -> None:
         """Discover and register tools for a specific connected server if not already loaded."""
         if name in self._tools_loaded:
+            server = self.registry.get_server(name)
+            if server:
+                num_tools = len(server.tools)
+                self.registration_attempts += num_tools
+                self.skipped_duplicates += num_tools
             return
 
         client = self.clients.get(name)
@@ -131,6 +145,7 @@ class MCPManager:
                 # Resolve name conflicts
                 if target_name in seen_names:
                     target_name = f"mcp_{name}_{orig_name}"
+                    self.conflicts_renamed += 1
                     logger.warning(
                         f"Tool name conflict: '{orig_name}' from server '{name}' "
                         f"already exists. Renamed to '{target_name}'."
@@ -150,7 +165,13 @@ class MCPManager:
                     parameters=schema,
                     approval_provider=self.approval_provider,
                 )
-                mcp_tools.append(mcp_tool)
+                
+                self.registration_attempts += 1
+                if target_name in {mt.name for mt in mcp_tools} or self.registry.find_tool(target_name) is not None:
+                    self.skipped_duplicates += 1
+                else:
+                    self.successful_registrations += 1
+                    mcp_tools.append(mcp_tool)
 
             server.tools = mcp_tools
             self._tools_loaded.add(name)

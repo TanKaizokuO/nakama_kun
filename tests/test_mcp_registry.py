@@ -289,3 +289,56 @@ async def test_reconnect_behavior(temp_workspace: Path) -> None:
     # Size should still be 1 (no duplicates)
     assert len(tool_registry) == 1
     assert tool_registry.names() == ["reconnect_tool"]
+
+
+@pytest.mark.anyio
+async def test_duplicate_prevention_metrics(temp_workspace: Path) -> None:
+    """Verify that registration_attempts, successful_registrations, and skipped_duplicates metrics track correctly."""
+    mcp_config = temp_workspace / "mcp_config.json"
+    mcp_config.write_text(
+        json.dumps({
+            "mcpServers": {
+                "metric-server": {
+                    "command": "node",
+                    "args": ["index.js"]
+                }
+            }
+        }),
+        encoding="utf-8"
+    )
+
+    manager = MCPManager(workspace_root=str(temp_workspace))
+
+    mock_initialize_result = MagicMock()
+    mock_initialize_result.capabilities = MagicMock()
+    mock_initialize_result.capabilities.model_dump.return_value = {}
+
+    mock_client = MagicMock(spec=MCPClient)
+    mock_client.name = "metric-server"
+    mock_client.connect = AsyncMock()
+    mock_client.disconnect = AsyncMock()
+    mock_client.session = MagicMock()
+    mock_client.session.initialize_result = mock_initialize_result
+
+    # Returns exactly 1 tool
+    tool1 = Tool(name="tool_one", description="Tool 1", inputSchema={})
+    mock_client.list_tools = AsyncMock(return_value=[tool1])
+
+    with patch("nakama_kun.mcp.manager.MCPClient", return_value=mock_client):
+        await manager.connect_all()
+
+    # Metrics on manager:
+    # 1 attempt: 1 success ("tool_one"), 0 skipped duplicates
+    assert manager.registration_attempts == 1
+    assert manager.successful_registrations == 1
+    assert manager.skipped_duplicates == 0
+
+    # Now call connect_all again, which skips discovery entirely because it is already loaded
+    with patch("nakama_kun.mcp.manager.MCPClient", return_value=mock_client):
+        await manager.connect_all()
+
+    # The skip of the server's tools (1 tool loaded) adds:
+    # attempts += 1, skipped += 1
+    assert manager.registration_attempts == 2
+    assert manager.skipped_duplicates == 1
+    assert manager.successful_registrations == 1
