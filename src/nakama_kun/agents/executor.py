@@ -168,15 +168,28 @@ class ExecutorAgent(BaseAgent):
             for tc in response.tool_calls:
                 name = tc.function.get("name", "")
                 arguments = tc.function.get("arguments", {})
-                key = _tool_call_key(name, arguments)
-                previous_attempt = attempt_history.get(key)
-                signature = _action_signature(name, arguments)
 
-                logger.info(f"[ExecutorAgent] Dispatching tool {name} with args: {arguments}")
+                # Tool Selection Layer Optimization
+                from nakama_kun.tools.selection import ToolSelectionLayer
+                selection = ToolSelectionLayer(new_tool_results + state.get("tool_results", []))
+                final_name, final_arguments, block_reason = selection.filter_and_optimize(name, arguments)
+
+                key = _tool_call_key(final_name, final_arguments)
+                previous_attempt = attempt_history.get(key)
+                signature = _action_signature(final_name, final_arguments)
+
+                logger.info(f"[ExecutorAgent] Dispatching tool {final_name} with args: {final_arguments}")
                 error: str | None = None
-                if delivery_mode and missing_artifacts and name in EXPLORATION_TOOLS:
+
+                if block_reason:
+                    error = block_reason
+                    result = ToolResult(success=False, error=error)
+                    success = result.success
+                    content = result.to_content()
+                    logger.warning(f"[ExecutorAgent] ToolSelectionLayer blocked: {block_reason}")
+                elif delivery_mode and missing_artifacts and final_name in EXPLORATION_TOOLS:
                     error = (
-                        f"BUDGET EXHAUSTED: RESEARCH PHASE COMPLETE. Tool '{name}' is blocked. "
+                        f"BUDGET EXHAUSTED: RESEARCH PHASE COMPLETE. Tool '{final_name}' is blocked. "
                         "Further repository exploration is prohibited unless explicitly justified. "
                         f"Create the missing artifacts now: {missing_artifacts}. Preferred tool: write_file."
                     )
@@ -184,7 +197,7 @@ class ExecutorAgent(BaseAgent):
                     success = result.success
                     content = result.to_content()
                     logger.warning(
-                        f"[ExecutorAgent] Blocked exploratory tool call {name} in delivery mode."
+                        f"[ExecutorAgent] Blocked exploratory tool call {final_name} in delivery mode."
                     )
                 elif (
                     previous_attempt and previous_attempt.get("last_result") is False
@@ -198,12 +211,12 @@ class ExecutorAgent(BaseAgent):
                     content = result.to_content()
                     attempt_num = (previous_attempt["attempt_count"] if previous_attempt else 0) + 1
                     logger.warning(
-                        f"[ExecutorAgent] Blocked repeated failed tool call {name} "
+                        f"[ExecutorAgent] Blocked repeated failed tool call {final_name} "
                         f"attempt={attempt_num}"
                     )
                 else:
                     try:
-                        result = await self.tool_router.dispatch(name, arguments, task_type=task_type)
+                        result = await self.tool_router.dispatch(final_name, final_arguments, task_type=task_type)
                         success = result.success
                         content = result.to_content()
                     except Exception as exc:
@@ -213,7 +226,7 @@ class ExecutorAgent(BaseAgent):
                         content = result.to_content()
 
                 error = _extract_tool_error(result, content) if not success else None
-                observation = _render_tool_observation(name, success, content, error)
+                observation = _render_tool_observation(final_name, success, content, error)
                 attempt_count = (previous_attempt["attempt_count"] if previous_attempt else 0) + 1
                 attempt_history[key] = {
                     "attempt_count": attempt_count,
@@ -227,15 +240,15 @@ class ExecutorAgent(BaseAgent):
                     role="tool",
                     content=observation,
                     tool_call_id=tc.id,
-                    name=name,
+                    name=final_name,
                 )
                 new_messages.append(tool_result_msg)
 
                 # Record tool results
                 new_tool_results.append(
                     {
-                        "tool": name,
-                        "arguments": arguments,
+                        "tool": final_name,
+                        "arguments": final_arguments,
                         "success": success,
                         "content": content,
                         "error": error,
@@ -265,17 +278,17 @@ class ExecutorAgent(BaseAgent):
                 if goal_satisfied:
                     break
 
-                if name in EXPLORATION_TOOLS:
+                if final_name in EXPLORATION_TOOLS:
                     research_actions_used += 1
                     research_budget_remaining = max(RESEARCH_THRESHOLD - research_actions_used, 0)
-                elif name in DELIVERY_TOOLS:
+                elif final_name in DELIVERY_TOOLS:
                     # Parse path from output to track created artifacts
                     from nakama_kun.orchestration.verification import (
                         _extract_path_from_write_output,
                     )
                     written_path = _extract_path_from_write_output(content)
-                    if not written_path and isinstance(arguments, dict) and "path" in arguments:
-                        written_path = arguments["path"]
+                    if not written_path and isinstance(final_arguments, dict) and "path" in final_arguments:
+                        written_path = final_arguments["path"]
                     if written_path:
                         import os
                         from pathlib import Path
