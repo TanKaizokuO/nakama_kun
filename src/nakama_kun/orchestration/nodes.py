@@ -1825,9 +1825,25 @@ def make_supervisor_agent_node(
     """
     async def supervisor_agent_node(state: AgentState) -> dict[str, Any]:
         logger.info("[LangGraph] Supervisor Agent Node starting...")
+        
+        # Classification foundation: determine task type exactly once near workflow startup
+        task_type = state.get("task_type")
+        extra_updates = {}
+        if not task_type:
+            task_type = classify_task(state["goal"])
+            extra_updates["task_type"] = task_type
+
         from nakama_kun.agents.supervisor import SupervisorAgent
         agent = SupervisorAgent(chat_service=chat_service)
-        res = await agent.run(dict(state))
+        
+        run_state = dict(state)
+        if extra_updates:
+            run_state.update(extra_updates)
+            
+        res = await agent.run(run_state)
+        
+        if extra_updates:
+            res.update(extra_updates)
         return res
 
     return supervisor_agent_node
